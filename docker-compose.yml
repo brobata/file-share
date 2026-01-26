@@ -1,0 +1,44 @@
+# File Share - Docker Compose
+#
+# Basic usage (app only, use with existing reverse proxy):
+#   docker compose up -d
+#
+# Standalone with built-in Caddy HTTPS reverse proxy:
+#   docker compose --profile https up -d
+#
+# Environment variables (optional, override data/config.json):
+#   PASSWORD       - Set password (auto-configures on first boot)
+#   SHARED_DIR     - Shared directory inside container (default: /data/shared)
+#   ALLOW_FULL_FILESYSTEM - Allow browsing full container filesystem (default: false)
+
+services:
+  file-share:
+    build: .
+    container_name: file-share
+    ports:
+      - "4040:4040"
+    volumes:
+      - ./data:/app/data
+      - ${HOST_SHARED_DIR:-~/shared}:/data/shared
+    environment:
+      - SHARED_DIR=/data/shared
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: file-share-caddy
+    profiles: ["https"]
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile.standalone:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - file-share
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:

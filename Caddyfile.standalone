@@ -1,0 +1,9 @@
+# Standalone Caddy reverse proxy for File Share
+# Used with: docker compose --profile https up -d
+#
+# Replace "files.example.com" with your actual domain or use
+# ":443" for self-signed local HTTPS on any hostname.
+
+:443 {
+	reverse_proxy file-share:4040
+}
