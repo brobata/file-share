@@ -3263,9 +3263,13 @@ function showContext(event, index) {
   }
 
   const menu = document.getElementById("contextMenu");
-  menu.style.left = event.clientX + "px";
-  menu.style.top = event.clientY + "px";
   menu.classList.add("visible");
+  const menuW = menu.offsetWidth;
+  const menuH = menu.offsetHeight;
+  const x = Math.min(event.clientX, window.innerWidth - menuW - 8);
+  const y = Math.min(event.clientY, window.innerHeight - menuH - 8);
+  menu.style.left = Math.max(0, x) + "px";
+  menu.style.top = Math.max(0, y) + "px";
 }
 
 document.addEventListener("click", (e) => {
