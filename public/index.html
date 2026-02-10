@@ -606,6 +606,7 @@
   .sort-btn:hover { border-color: var(--accent); color: var(--text); }
   .sort-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
   .sort-btn svg { width: 14px; height: 14px; }
+  .sort-btn.hidden-toggle { margin-left: 8px; }
   .results-count {
     font-size: 12px;
     color: var(--text-muted);
@@ -1906,6 +1907,12 @@
       Size
     </button>
   </div>
+  <button class="sort-btn hidden-toggle" id="hiddenToggle" onclick="toggleHiddenFiles()" title="Show hidden files">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
+    </svg>
+    Hidden
+  </button>
   <span class="results-count" id="resultsCount"></span>
 </div>
 
@@ -2048,6 +2055,7 @@ let searchQuery = "";
 let drives = [];
 let expandedPaths = new Set();
 let sidebarCollapsed = localStorage.getItem("sidebarCollapsed") === "true";
+let showHiddenFiles = localStorage.getItem("showHiddenFiles") === "true";
 
 // Setup functions
 async function checkSetupNeeded() {
@@ -2264,6 +2272,21 @@ function clearSearch() {
   applyFilterAndSort();
 }
 
+function toggleHiddenFiles() {
+  showHiddenFiles = !showHiddenFiles;
+  localStorage.setItem("showHiddenFiles", showHiddenFiles);
+  updateHiddenToggle();
+  navigate(currentPath);
+}
+
+function updateHiddenToggle() {
+  const btn = document.getElementById("hiddenToggle");
+  if (btn) {
+    btn.classList.toggle("active", showHiddenFiles);
+    btn.title = showHiddenFiles ? "Hide hidden files" : "Show hidden files";
+  }
+}
+
 // Sort functions
 function setSort(field) {
   if (currentSort.field === field) {
@@ -2273,7 +2296,7 @@ function setSort(field) {
     currentSort.asc = field === "name";
   }
 
-  document.querySelectorAll(".sort-btn").forEach(btn => {
+  document.querySelectorAll(".sort-btn:not(.hidden-toggle)").forEach(btn => {
     btn.classList.toggle("active", btn.dataset.sort === field);
   });
 
@@ -3216,7 +3239,9 @@ async function navigate(path, { pushHistory = true } = {}) {
   showLoadingSkeletons();
 
   try {
-    const res = await fetch("/api/list?path=" + encodeURIComponent(currentPath), {
+    let listUrl = "/api/list?path=" + encodeURIComponent(currentPath);
+    if (showHiddenFiles) listUrl += "&hidden=true";
+    const res = await fetch(listUrl, {
       headers: authHeaders()
     });
     if (res.status === 401) {
@@ -3915,6 +3940,9 @@ async function initApp() {
     document.getElementById("sidebar").classList.add("collapsed");
   }
   document.body.classList.toggle("sidebar-is-collapsed", sidebarCollapsed);
+
+  // Restore hidden files toggle state
+  updateHiddenToggle();
 
   // Load system info first to get defaultDir
   await loadSystemInfo();
