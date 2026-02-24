@@ -626,6 +626,28 @@ app.post("/api/rename", requireAuth, async (req, res) => {
   }
 });
 
+// API: Copy file/folder to another location
+app.post("/api/copy", requireAuth, async (req, res) => {
+  try {
+    const sourcePath = safePath(req.body.sourcePath);
+    const destPath = safePath(req.body.destPath);
+
+    await fs.access(sourcePath);
+
+    try {
+      await fs.access(destPath);
+      return res.status(400).json({ error: "File already exists in destination" });
+    } catch {
+      // Good, destination doesn't exist
+    }
+
+    await fs.cp(sourcePath, destPath, { recursive: true });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // API: Move file to another folder
 app.post("/api/move", requireAuth, async (req, res) => {
   try {

@@ -1634,6 +1634,26 @@
   .details-row.selected .checkbox svg { opacity: 1; }
   .details-row.drag-over { background: rgba(34, 197, 94, 0.1); box-shadow: inset 0 0 0 1px var(--success); }
 
+  /* Cut pending (dimmed) */
+  .file-item.cut-pending, .details-row.cut-pending { opacity: 0.4; }
+
+  /* Focused item (keyboard nav) */
+  .file-item.focused { box-shadow: 0 0 0 2px var(--accent); }
+  .details-row.focused { box-shadow: inset 2px 0 0 var(--accent); background: var(--surface2); }
+
+  /* Inline rename input */
+  .inline-rename-input {
+    width: 100%;
+    padding: 2px 4px;
+    border: 1px solid var(--accent);
+    border-radius: 4px;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 12px;
+    font-family: inherit;
+    outline: none;
+  }
+
   /* View toggle button */
   .view-toggle {
     display: flex;
@@ -2169,6 +2189,18 @@
       </svg>
       Clear
     </button>
+    <button class="sel-btn ghost" onclick="copySelected()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+      </svg>
+      Copy
+    </button>
+    <button class="sel-btn ghost" onclick="cutSelected()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="20" y1="4" x2="8.12" y2="15.88"/><line x1="14.47" y1="14.48" x2="20" y2="20"/><line x1="8.12" y1="8.12" x2="12" y2="12"/>
+      </svg>
+      Cut
+    </button>
   </div>
   <div class="divider"></div>
   <div class="actions">
@@ -2298,6 +2330,10 @@ let showHiddenFiles = localStorage.getItem("showHiddenFiles") === "true";
 let navHistory = [];
 let navHistoryIndex = -1;
 let viewMode = localStorage.getItem("viewMode") || "grid";
+let clipboard = { paths: [], isCut: false, sourceDir: "" };
+let focusedIndex = -1;
+let lastClickTime = 0;
+let lastClickIndex = -1;
 
 // Setup functions
 async function checkSetupNeeded() {
@@ -3933,6 +3969,151 @@ async function confirmNewFile() {
   }
 }
 
+// Clipboard (Copy/Cut/Paste)
+function copySelected() {
+  const selected = getSelectedItems();
+  if (selected.length === 0) return;
+  clipboard = { paths: selected.map(i => i.path), isCut: false, sourceDir: currentPath };
+  toast("Copied " + selected.length + " item(s)", "success");
+  updateCutPending();
+}
+
+function cutSelected() {
+  const selected = getSelectedItems();
+  if (selected.length === 0) return;
+  clipboard = { paths: selected.map(i => i.path), isCut: true, sourceDir: currentPath };
+  toast("Cut " + selected.length + " item(s)", "success");
+  updateCutPending();
+}
+
+async function pasteItems() {
+  if (!clipboard.paths || clipboard.paths.length === 0) return;
+  let successCount = 0;
+  let failCount = 0;
+
+  for (const srcPath of clipboard.paths) {
+    const fileName = srcPath.split("/").pop();
+    const destPath = currentPath + "/" + fileName;
+    try {
+      const endpoint = clipboard.isCut ? "/api/move" : "/api/copy";
+      const body = clipboard.isCut
+        ? { sourcePath: srcPath, destPath }
+        : { sourcePath: srcPath, destPath };
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (res.ok) successCount++;
+      else failCount++;
+    } catch { failCount++; }
+  }
+
+  if (successCount > 0) {
+    toast((clipboard.isCut ? "Moved " : "Copied ") + successCount + " item(s)", "success");
+  }
+  if (failCount > 0) {
+    toast("Failed: " + failCount + " item(s)", "error");
+  }
+  if (clipboard.isCut) {
+    clipboard = { paths: [], isCut: false, sourceDir: "" };
+  }
+  updateCutPending();
+  navigate(currentPath);
+}
+
+function updateCutPending() {
+  document.querySelectorAll(".cut-pending").forEach(el => el.classList.remove("cut-pending"));
+  if (clipboard.isCut && clipboard.paths.length > 0) {
+    clipboard.paths.forEach(p => {
+      const el = document.querySelector('[data-path="' + CSS.escape(p) + '"]');
+      if (el) el.classList.add("cut-pending");
+    });
+  }
+}
+
+// Keyboard navigation
+function setFocused(index) {
+  document.querySelectorAll(".file-item.focused, .details-row.focused").forEach(el => el.classList.remove("focused"));
+  focusedIndex = index;
+  if (index >= 0 && index < filteredItems.length) {
+    const sel = viewMode === "details" ? ".details-row" : ".file-item";
+    const el = document.querySelector(sel + '[data-index="' + index + '"]');
+    if (el) {
+      el.classList.add("focused");
+      el.scrollIntoView({ block: "nearest" });
+    }
+  }
+}
+
+function getGridColumns() {
+  const grid = document.getElementById("fileGrid");
+  if (viewMode === "details") return 1;
+  const items = grid.querySelectorAll(".file-item");
+  if (items.length < 2) return 1;
+  const firstTop = items[0].getBoundingClientRect().top;
+  let cols = 1;
+  for (let i = 1; i < items.length; i++) {
+    if (items[i].getBoundingClientRect().top === firstTop) cols++;
+    else break;
+  }
+  return cols;
+}
+
+// Inline rename
+function startInlineRename(index) {
+  const item = filteredItems[index];
+  if (!item) return;
+  contextTarget = item;
+
+  const sel = viewMode === "details" ? ".details-row" : ".file-item";
+  const el = document.querySelector(sel + '[data-index="' + index + '"]');
+  if (!el) return;
+
+  const nameEl = viewMode === "details"
+    ? el.querySelector(".name-text")
+    : el.querySelector(".name");
+  if (!nameEl) return;
+
+  const oldName = item.name;
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "inline-rename-input";
+  input.value = oldName;
+
+  // Select name without extension for files
+  const dotIndex = oldName.lastIndexOf(".");
+  const selectEnd = (!item.isDirectory && dotIndex > 0) ? dotIndex : oldName.length;
+
+  nameEl.textContent = "";
+  nameEl.appendChild(input);
+  input.focus();
+  input.setSelectionRange(0, selectEnd);
+
+  const finish = async (save) => {
+    const newName = input.value.trim();
+    nameEl.textContent = oldName;
+    if (save && newName && newName !== oldName) {
+      try {
+        await fetch("/api/rename", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ oldPath: item.path, newName }),
+        });
+        toast("Renamed to " + newName, "success");
+        navigate(currentPath);
+      } catch { toast("Rename failed", "error"); }
+    }
+  };
+
+  input.onkeydown = (e) => {
+    if (e.key === "Enter") { e.preventDefault(); finish(true); }
+    else if (e.key === "Escape") { e.preventDefault(); finish(false); }
+    e.stopPropagation();
+  };
+  input.onblur = () => finish(true);
+}
+
 // Drag to move functionality
 function handleDragStart(event, index) {
   const item = filteredItems[index];
@@ -4007,6 +4188,8 @@ function handleClick(event, index) {
   const item = filteredItems[index];
   if (!item) return;
 
+  setFocused(index);
+
   // Check for modifier keys for selection
   if (event.ctrlKey || event.metaKey) {
     toggleSelect(index, event);
@@ -4017,6 +4200,20 @@ function handleClick(event, index) {
     selectRange(lastSelectedIndex, index);
     return;
   }
+
+  // Slow double-click detection for inline rename
+  const now = Date.now();
+  if (selectedPaths.size === 1 && selectedPaths.has(item.path) && lastClickIndex === index) {
+    const elapsed = now - lastClickTime;
+    if (elapsed > 500 && elapsed < 2000) {
+      lastClickTime = 0;
+      lastClickIndex = -1;
+      startInlineRename(index);
+      return;
+    }
+  }
+  lastClickTime = now;
+  lastClickIndex = index;
 
   // Normal click - if no selection, do default action; if has selection, just select this one
   if (selectedPaths.size > 0) {
@@ -4445,7 +4642,27 @@ document.addEventListener("keydown", e => {
       clearSearch();
     } else {
       clearSelection();
+      setFocused(-1);
     }
+  }
+
+  // Ctrl+C: Copy
+  if ((e.ctrlKey || e.metaKey) && e.key === "c" && selectedPaths.size > 0) {
+    e.preventDefault();
+    copySelected();
+    return;
+  }
+  // Ctrl+X: Cut
+  if ((e.ctrlKey || e.metaKey) && e.key === "x" && selectedPaths.size > 0) {
+    e.preventDefault();
+    cutSelected();
+    return;
+  }
+  // Ctrl+V: Paste
+  if ((e.ctrlKey || e.metaKey) && e.key === "v" && clipboard.paths.length > 0) {
+    e.preventDefault();
+    pasteItems();
+    return;
   }
 
   // Ctrl+A or Cmd+A to select all
@@ -4460,10 +4677,86 @@ document.addEventListener("keydown", e => {
     document.getElementById("searchInput").focus();
   }
 
+  // F2: inline rename
+  if (e.key === "F2") {
+    e.preventDefault();
+    const idx = focusedIndex >= 0 ? focusedIndex : (selectedPaths.size === 1 ? filteredItems.findIndex(i => selectedPaths.has(i.path)) : -1);
+    if (idx >= 0) startInlineRename(idx);
+    return;
+  }
+
   // Delete or Backspace to delete selected
   if ((e.key === "Delete" || e.key === "Backspace") && selectedPaths.size > 0) {
     e.preventDefault();
     deleteSelected();
+  }
+
+  // Arrow key navigation
+  if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key) && !e.altKey) {
+    if (filteredItems.length === 0) return;
+    e.preventDefault();
+    const cols = getGridColumns();
+    let newIdx = focusedIndex;
+
+    if (e.key === "ArrowRight") newIdx = Math.min(focusedIndex + 1, filteredItems.length - 1);
+    else if (e.key === "ArrowLeft") newIdx = Math.max(focusedIndex - 1, 0);
+    else if (e.key === "ArrowDown") newIdx = Math.min(focusedIndex + cols, filteredItems.length - 1);
+    else if (e.key === "ArrowUp") newIdx = Math.max(focusedIndex - cols, 0);
+
+    if (focusedIndex < 0) newIdx = 0;
+    setFocused(newIdx);
+
+    if (e.shiftKey) {
+      // Shift+Arrow: extend selection
+      const item = filteredItems[newIdx];
+      if (item) {
+        selectedPaths.add(item.path);
+        const sel = viewMode === "details" ? ".details-row" : ".file-item";
+        const el = document.querySelector(sel + '[data-index="' + newIdx + '"]');
+        if (el) el.classList.add("selected");
+        lastSelectedIndex = newIdx;
+        updateSelectionUI();
+      }
+    }
+    return;
+  }
+
+  // Enter: open focused item
+  if (e.key === "Enter" && focusedIndex >= 0) {
+    e.preventDefault();
+    const item = filteredItems[focusedIndex];
+    if (item) {
+      if (item.isDirectory) navigate(item.path);
+      else if (isMedia(item.name)) openMedia(focusedIndex);
+      else if (isTextFile(item.name)) openTextPreview(focusedIndex);
+      else window.open("/api/download?path=" + encodeURIComponent(item.path));
+    }
+    return;
+  }
+
+  // Space: toggle select focused item
+  if (e.key === " " && focusedIndex >= 0) {
+    e.preventDefault();
+    toggleSelect(focusedIndex, e);
+    return;
+  }
+
+  // Home/End
+  if (e.key === "Home" && filteredItems.length > 0) { e.preventDefault(); setFocused(0); return; }
+  if (e.key === "End" && filteredItems.length > 0) { e.preventDefault(); setFocused(filteredItems.length - 1); return; }
+
+  // Page Up/Down
+  if (e.key === "PageUp" && filteredItems.length > 0) {
+    e.preventDefault();
+    const cols = getGridColumns();
+    setFocused(Math.max(0, focusedIndex - cols * 4));
+    return;
+  }
+  if (e.key === "PageDown" && filteredItems.length > 0) {
+    e.preventDefault();
+    const cols = getGridColumns();
+    setFocused(Math.min(filteredItems.length - 1, focusedIndex + cols * 4));
+    return;
   }
 });
 
