@@ -1670,6 +1670,142 @@
     word-break: break-all;
   }
 
+  /* Favorites section */
+  .favorites-section {
+    padding: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  .favorites-section .section-title {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-muted);
+    padding: 4px 12px 6px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .fav-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    transition: background 0.1s;
+  }
+  .fav-item:hover { background: var(--surface2); }
+  .fav-item.active { background: rgba(59,130,246,0.1); color: var(--accent); }
+  .fav-item svg { width: 16px; height: 16px; flex-shrink: 0; color: var(--text-muted); }
+  .fav-item .fav-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fav-item .fav-remove {
+    width: 20px; height: 20px; border: none; background: transparent;
+    color: var(--text-muted); cursor: pointer; display: none;
+    align-items: center; justify-content: center; border-radius: 4px;
+    font-size: 14px;
+  }
+  .fav-item:hover .fav-remove { display: flex; }
+  .fav-item .fav-remove:hover { background: var(--border); color: var(--danger); }
+
+  /* Star/pin button in nav bar */
+  .pin-btn {
+    width: 32px; height: 32px; border: 1px solid var(--border); border-radius: 6px;
+    background: var(--surface2); color: var(--text-muted); cursor: pointer;
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  }
+  .pin-btn:hover { background: var(--border); color: #fbbf24; }
+  .pin-btn.pinned { color: #fbbf24; background: rgba(251,191,36,0.1); border-color: rgba(251,191,36,0.3); }
+  .pin-btn svg { width: 16px; height: 16px; }
+
+  /* Batch rename modal */
+  .batch-rename-preview {
+    max-height: 200px;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    margin-top: 12px;
+    font-size: 12px;
+  }
+  .batch-rename-row {
+    display: flex;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--border);
+    gap: 8px;
+  }
+  .batch-rename-row:last-child { border-bottom: none; }
+  .batch-rename-row .old-name { flex: 1; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .batch-rename-row .arrow { color: var(--text-muted); flex-shrink: 0; }
+  .batch-rename-row .new-name { flex: 1; color: var(--accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* Preview pane */
+  .preview-pane {
+    width: 350px;
+    min-width: 350px;
+    background: var(--surface);
+    border-left: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    transition: width 0.2s, min-width 0.2s;
+  }
+  .preview-pane.hidden { width: 0; min-width: 0; border-left: none; overflow: hidden; }
+  .preview-pane .preview-header {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .preview-pane .preview-body {
+    flex: 1;
+    overflow: auto;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+  }
+  .preview-pane .preview-body img,
+  .preview-pane .preview-body video,
+  .preview-pane .preview-body audio {
+    max-width: 100%;
+    max-height: 300px;
+    border-radius: 8px;
+    object-fit: contain;
+  }
+  .preview-pane .preview-body .preview-text {
+    width: 100%;
+    max-height: 300px;
+    overflow: auto;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px;
+    font-family: monospace;
+    font-size: 12px;
+    white-space: pre-wrap;
+    word-break: break-all;
+    color: var(--text);
+  }
+  .preview-pane .preview-info {
+    width: 100%;
+    font-size: 12px;
+    color: var(--text-muted);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  @media (max-width: 900px) {
+    .preview-pane { width: 280px; min-width: 280px; }
+  }
+  @media (max-width: 768px) {
+    .preview-pane { display: none; }
+  }
+
   /* View toggle button */
   .view-toggle {
     display: flex;
@@ -2050,6 +2186,7 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="11 17 6 12 11 7"/><polyline points="18 17 13 12 18 7"/></svg>
       </button>
     </div>
+    <div class="favorites-section" id="favoritesSection"></div>
     <div class="drives-section" id="drivesSection">
       <!-- Drives will be loaded here -->
     </div>
@@ -2134,6 +2271,9 @@
   <button class="nav-btn" onclick="navigate(currentPath)" title="Refresh (F5)">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
   </button>
+  <button class="pin-btn" id="pinBtn" onclick="togglePinCurrent()" title="Pin to favorites">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+  </button>
 </div>
 
 <div class="path-bar">
@@ -2187,6 +2327,10 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
     </button>
   </div>
+  <button class="sort-btn" id="previewToggleBtn" onclick="togglePreviewPane()" title="Toggle preview pane">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
+    Preview
+  </button>
   <span class="results-count" id="resultsCount"></span>
 </div>
 
@@ -2308,6 +2452,24 @@
   </div>
 </div>
 
+<!-- Batch Rename modal -->
+<div class="modal-overlay" id="batchRenameModal">
+  <div class="modal" style="max-width:520px">
+    <h3>Batch Rename</h3>
+    <p style="font-size:12px;color:var(--text-muted);margin-bottom:8px;">Pattern: use <code>#</code> for number, <code>{name}</code> for original name, <code>{ext}</code> for extension</p>
+    <input type="text" id="batchRenameInput" placeholder="Photo (#)" oninput="updateBatchRenamePreview()">
+    <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
+      <label style="font-size:12px;color:var(--text-muted)">Start #:</label>
+      <input type="number" id="batchRenameStart" value="1" min="0" style="width:60px" oninput="updateBatchRenamePreview()">
+    </div>
+    <div class="batch-rename-preview" id="batchRenamePreview"></div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal('batchRenameModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="applyBatchRename()">Rename</button>
+    </div>
+  </div>
+</div>
+
 <!-- Media preview (images, video, audio) -->
 <div class="media-overlay" id="mediaOverlay" onclick="if(event.target === this) closeMedia()">
   <button class="media-close" onclick="closeMedia()">
@@ -2335,6 +2497,19 @@
 </div>
 
   </div><!-- end main-content -->
+
+  <!-- Preview pane -->
+  <div class="preview-pane hidden" id="previewPane">
+    <div class="preview-header">
+      <span id="previewTitle">Preview</span>
+      <button class="nav-btn" onclick="togglePreviewPane()" title="Close preview" style="width:24px;height:24px;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="preview-body" id="previewBody">
+      <div style="color:var(--text-muted);font-size:13px;">Select a file to preview</div>
+    </div>
+  </div>
 </div><!-- end app-layout -->
 
 <!-- Toasts -->
@@ -3553,6 +3728,8 @@ async function navigate(path, { pushHistory = true, navPush = true } = {}) {
     }
     currentItems = await res.json();
     applyFilterAndSort();
+    renderFavorites();
+    updatePinButton();
   } catch (err) {
     toast("Failed to load directory", "error");
     document.getElementById("fileGrid").textContent = "";
@@ -3952,6 +4129,9 @@ function showEmptySpaceContext(event) {
   }
   items.push({ icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>', label: "Refresh", fn: () => { hideContextMenu(); navigate(currentPath); } });
   items.push({ icon: viewMode === "grid" ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>' : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>', label: viewMode === "grid" ? "Details View" : "Grid View", fn: () => { hideContextMenu(); setViewMode(viewMode === "grid" ? "details" : "grid"); } });
+  items.push({ separator: true });
+  const isPinned = favorites.includes(currentPath);
+  items.push({ icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>', label: isPinned ? "Unpin from Favorites" : "Pin to Favorites", fn: () => { hideContextMenu(); togglePinCurrent(); } });
 
   buildContextMenu(items);
   const menu = document.getElementById("contextMenu");
@@ -4401,6 +4581,7 @@ function updateSelectionUI() {
   }
   updateSelectedPath();
   updateStatusBar();
+  updatePreviewPane();
 }
 
 function getSelectedItems() {
@@ -4429,6 +4610,9 @@ function showContext(event, index) {
   const renIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>';
   const delIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
 
+  const cutIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="20" y1="4" x2="8.12" y2="15.88"/><line x1="14.47" y1="14.48" x2="20" y2="20"/><line x1="8.12" y1="8.12" x2="12" y2="12"/></svg>';
+  const starIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>';
+
   const menuItems = [
     { icon: dlIcon, label: count > 1 ? "Download " + count + " items" : "Download", fn: () => { hideContextMenu(); downloadItem(); } },
   ];
@@ -4436,10 +4620,23 @@ function showContext(event, index) {
     menuItems.push({ icon: cpIcon, label: "Copy Path", fn: () => { hideContextMenu(); copyItemPath(); } });
     menuItems.push({ icon: renIcon, label: "Rename", fn: () => { hideContextMenu(); renameItem(); } });
   }
+  if (count > 1) {
+    menuItems.push({ icon: renIcon, label: "Batch Rename", fn: () => { hideContextMenu(); openBatchRename(); } });
+  }
+  menuItems.push({ separator: true });
+  menuItems.push({ icon: cpIcon, label: "Copy", fn: () => { hideContextMenu(); copySelected(); } });
+  menuItems.push({ icon: cutIcon, label: "Cut", fn: () => { hideContextMenu(); cutSelected(); } });
+  if (clipboard.paths.length > 0) {
+    menuItems.push({ icon: cpIcon, label: "Paste", fn: () => { hideContextMenu(); pasteItems(); } });
+  }
   menuItems.push({ separator: true });
   menuItems.push({ icon: delIcon, label: count > 1 ? "Delete " + count + " items" : "Delete", danger: true, fn: () => { hideContextMenu(); deleteItem(); } });
   if (count === 1) {
     menuItems.push({ separator: true });
+    if (item.isDirectory) {
+      const isPinned = favorites.includes(item.path);
+      menuItems.push({ icon: starIcon, label: isPinned ? "Unpin from Favorites" : "Pin to Favorites", fn: () => { hideContextMenu(); if (isPinned) { favorites.splice(favorites.indexOf(item.path), 1); } else { favorites.push(item.path); } saveFavorites(); renderFavorites(); } });
+    }
     const propsIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>';
     menuItems.push({ icon: propsIcon, label: "Properties", fn: () => { hideContextMenu(); showProperties(contextTarget.path); } });
   }
@@ -4697,6 +4894,294 @@ document.addEventListener("drop", e => {
   }
 });
 
+// ==================== FAVORITES ====================
+let favorites = JSON.parse(localStorage.getItem("favorites") || "[]");
+
+function saveFavorites() {
+  localStorage.setItem("favorites", JSON.stringify(favorites));
+}
+
+function renderFavorites() {
+  const container = document.getElementById("favoritesSection");
+  container.textContent = "";
+  if (favorites.length === 0) {
+    container.style.display = "none";
+    return;
+  }
+  container.style.display = "";
+  const title = document.createElement("div");
+  title.className = "section-title";
+  title.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:12px;height:12px"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>';
+  const titleText = document.createElement("span");
+  titleText.textContent = "Favorites";
+  title.appendChild(titleText);
+  container.appendChild(title);
+
+  favorites.forEach((fav, idx) => {
+    const item = document.createElement("div");
+    item.className = "fav-item";
+    if (fav === currentPath) item.classList.add("active");
+    item.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>';
+    const nameSpan = document.createElement("span");
+    nameSpan.className = "fav-name";
+    nameSpan.textContent = fav.split("/").filter(Boolean).pop() || fav;
+    nameSpan.title = fav;
+    item.appendChild(nameSpan);
+    const removeBtn = document.createElement("button");
+    removeBtn.className = "fav-remove";
+    removeBtn.textContent = "\u00d7";
+    removeBtn.title = "Remove from favorites";
+    removeBtn.onclick = (e) => { e.stopPropagation(); removeFavorite(idx); };
+    item.appendChild(removeBtn);
+    item.onclick = () => navigate(fav);
+    container.appendChild(item);
+  });
+}
+
+function togglePinCurrent() {
+  const idx = favorites.indexOf(currentPath);
+  if (idx >= 0) {
+    favorites.splice(idx, 1);
+  } else {
+    favorites.push(currentPath);
+  }
+  saveFavorites();
+  renderFavorites();
+  updatePinButton();
+}
+
+function removeFavorite(idx) {
+  favorites.splice(idx, 1);
+  saveFavorites();
+  renderFavorites();
+  updatePinButton();
+}
+
+function updatePinButton() {
+  const btn = document.getElementById("pinBtn");
+  if (!btn) return;
+  const isPinned = favorites.includes(currentPath);
+  btn.classList.toggle("pinned", isPinned);
+  btn.title = isPinned ? "Unpin from favorites" : "Pin to favorites";
+}
+
+// ==================== BATCH RENAME ====================
+function openBatchRename() {
+  const selected = getSelectedItems();
+  if (selected.length < 2) return;
+  document.getElementById("batchRenameInput").value = "{name}";
+  document.getElementById("batchRenameStart").value = "1";
+  document.getElementById("batchRenameModal").classList.add("visible");
+  updateBatchRenamePreview();
+  setTimeout(() => document.getElementById("batchRenameInput").focus(), 50);
+}
+
+function parseBatchPattern(pattern, originalName, index) {
+  const lastDot = originalName.lastIndexOf(".");
+  const nameOnly = lastDot > 0 ? originalName.substring(0, lastDot) : originalName;
+  const ext = lastDot > 0 ? originalName.substring(lastDot + 1) : "";
+  let result = pattern.replace(/\{name\}/g, nameOnly).replace(/\{ext\}/g, ext);
+  // Replace # sequences with zero-padded numbers
+  result = result.replace(/#+/g, (match) => {
+    return String(index).padStart(match.length, "0");
+  });
+  // If pattern doesn't include an extension and original had one, add it back
+  if (ext && !result.includes(".")) {
+    result += "." + ext;
+  }
+  return result;
+}
+
+function updateBatchRenamePreview() {
+  const pattern = document.getElementById("batchRenameInput").value;
+  const startNum = parseInt(document.getElementById("batchRenameStart").value) || 1;
+  const selected = getSelectedItems();
+  const preview = document.getElementById("batchRenamePreview");
+  preview.textContent = "";
+  selected.forEach((item, i) => {
+    const newName = parseBatchPattern(pattern, item.name, startNum + i);
+    const row = document.createElement("div");
+    row.className = "batch-rename-row";
+    const oldSpan = document.createElement("span");
+    oldSpan.className = "old-name";
+    oldSpan.textContent = item.name;
+    const arrow = document.createElement("span");
+    arrow.className = "arrow";
+    arrow.textContent = "\u2192";
+    const newSpan = document.createElement("span");
+    newSpan.className = "new-name";
+    newSpan.textContent = newName;
+    row.appendChild(oldSpan);
+    row.appendChild(arrow);
+    row.appendChild(newSpan);
+    preview.appendChild(row);
+  });
+}
+
+async function applyBatchRename() {
+  const pattern = document.getElementById("batchRenameInput").value.trim();
+  if (!pattern) return;
+  const startNum = parseInt(document.getElementById("batchRenameStart").value) || 1;
+  const selected = getSelectedItems();
+  let successCount = 0;
+  for (let i = 0; i < selected.length; i++) {
+    const newName = parseBatchPattern(pattern, selected[i].name, startNum + i);
+    if (newName === selected[i].name) continue;
+    try {
+      const res = await fetch("/api/rename", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ oldPath: selected[i].path, newName }),
+      });
+      if (res.ok) successCount++;
+    } catch { /* skip failures */ }
+  }
+  closeModal("batchRenameModal");
+  toast("Renamed " + successCount + " items", "success");
+  navigate(currentPath);
+}
+
+// ==================== PREVIEW PANE ====================
+let previewPaneVisible = localStorage.getItem("previewPane") === "true";
+
+function togglePreviewPane() {
+  previewPaneVisible = !previewPaneVisible;
+  localStorage.setItem("previewPane", previewPaneVisible);
+  const pane = document.getElementById("previewPane");
+  pane.classList.toggle("hidden", !previewPaneVisible);
+  const btn = document.getElementById("previewToggleBtn");
+  if (btn) btn.classList.toggle("active", previewPaneVisible);
+  if (previewPaneVisible) updatePreviewPane();
+}
+
+function updatePreviewPane() {
+  if (!previewPaneVisible) return;
+  const pane = document.getElementById("previewPane");
+  const body = document.getElementById("previewBody");
+  const title = document.getElementById("previewTitle");
+
+  const selected = getSelectedItems();
+  if (selected.length === 0) {
+    title.textContent = "Preview";
+    body.textContent = "";
+    const hint = document.createElement("div");
+    hint.style.cssText = "color:var(--text-muted);font-size:13px;";
+    hint.textContent = "Select a file to preview";
+    body.appendChild(hint);
+    return;
+  }
+  if (selected.length > 1) {
+    title.textContent = selected.length + " items selected";
+    body.textContent = "";
+    const info = document.createElement("div");
+    info.className = "preview-info";
+    let totalSize = 0;
+    let fileCount = 0;
+    let folderCount = 0;
+    selected.forEach(item => {
+      if (item.isDirectory) folderCount++;
+      else { fileCount++; totalSize += item.size || 0; }
+    });
+    const lines = [];
+    if (fileCount > 0) lines.push(fileCount + " file" + (fileCount > 1 ? "s" : ""));
+    if (folderCount > 0) lines.push(folderCount + " folder" + (folderCount > 1 ? "s" : ""));
+    lines.push("Total size: " + formatSize(totalSize));
+    lines.forEach(line => {
+      const div = document.createElement("div");
+      div.textContent = line;
+      info.appendChild(div);
+    });
+    body.textContent = "";
+    body.appendChild(info);
+    return;
+  }
+
+  // Single item selected
+  const item = selected[0];
+  title.textContent = item.name;
+  body.textContent = "";
+
+  if (item.isDirectory) {
+    const info = document.createElement("div");
+    info.className = "preview-info";
+    const iconDiv = document.createElement("div");
+    iconDiv.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:48px;height:48px;color:var(--text-muted)"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>';
+    body.appendChild(iconDiv);
+    const d = document.createElement("div");
+    d.textContent = "Folder";
+    d.style.color = "var(--text-muted)";
+    info.appendChild(d);
+    if (item.modified) {
+      const m = document.createElement("div");
+      m.textContent = "Modified: " + new Date(item.modified).toLocaleString();
+      info.appendChild(m);
+    }
+    body.appendChild(info);
+    return;
+  }
+
+  const ext = item.name.split(".").pop().toLowerCase();
+  const imageExts = ["jpg", "jpeg", "png", "gif", "webp", "svg", "bmp", "ico"];
+  const videoExts = ["mp4", "webm", "ogg", "mov"];
+  const audioExts = ["mp3", "wav", "ogg", "flac", "aac", "m4a"];
+  const textExts = ["txt", "md", "json", "js", "ts", "jsx", "tsx", "css", "html", "xml", "py", "sh", "bash", "yml", "yaml", "toml", "ini", "cfg", "conf", "log", "env", "csv", "sql", "rs", "go", "java", "c", "cpp", "h", "hpp", "rb", "php", "lua", "vim", "gitignore", "dockerfile", "makefile"];
+
+  const downloadUrl = "/api/download?path=" + encodeURIComponent(item.path);
+
+  if (imageExts.includes(ext)) {
+    const img = document.createElement("img");
+    img.src = downloadUrl;
+    img.alt = item.name;
+    img.loading = "lazy";
+    body.appendChild(img);
+  } else if (videoExts.includes(ext)) {
+    const video = document.createElement("video");
+    video.src = downloadUrl;
+    video.controls = true;
+    video.preload = "metadata";
+    body.appendChild(video);
+  } else if (audioExts.includes(ext)) {
+    const audio = document.createElement("audio");
+    audio.src = downloadUrl;
+    audio.controls = true;
+    body.appendChild(audio);
+  } else if (textExts.includes(ext)) {
+    const pre = document.createElement("div");
+    pre.className = "preview-text";
+    pre.textContent = "Loading...";
+    body.appendChild(pre);
+    fetch(downloadUrl).then(res => {
+      if (!res.ok) throw new Error("Failed");
+      return res.text();
+    }).then(text => {
+      pre.textContent = text.substring(0, 10000);
+      if (text.length > 10000) pre.textContent += "\n... (truncated)";
+    }).catch(() => {
+      pre.textContent = "Could not load preview";
+    });
+  } else {
+    const icon = document.createElement("div");
+    icon.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:48px;height:48px;color:var(--text-muted)"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
+    body.appendChild(icon);
+  }
+
+  // File info below preview
+  const info = document.createElement("div");
+  info.className = "preview-info";
+  const sizeDiv = document.createElement("div");
+  sizeDiv.textContent = "Size: " + formatSize(item.size || 0);
+  info.appendChild(sizeDiv);
+  if (item.modified) {
+    const modDiv = document.createElement("div");
+    modDiv.textContent = "Modified: " + new Date(item.modified).toLocaleString();
+    info.appendChild(modDiv);
+  }
+  const typeDiv = document.createElement("div");
+  typeDiv.textContent = "Type: " + getFileType(item.name, false);
+  info.appendChild(typeDiv);
+  body.appendChild(info);
+}
+
 // Keyboard shortcuts
 document.addEventListener("keydown", e => {
   // Don't trigger shortcuts when typing in inputs
@@ -4772,11 +5257,15 @@ document.addEventListener("keydown", e => {
     document.getElementById("searchInput").focus();
   }
 
-  // F2: inline rename
+  // F2: inline rename or batch rename
   if (e.key === "F2") {
     e.preventDefault();
-    const idx = focusedIndex >= 0 ? focusedIndex : (selectedPaths.size === 1 ? filteredItems.findIndex(i => selectedPaths.has(i.path)) : -1);
-    if (idx >= 0) startInlineRename(idx);
+    if (selectedPaths.size > 1) {
+      openBatchRename();
+    } else {
+      const idx = focusedIndex >= 0 ? focusedIndex : (selectedPaths.size === 1 ? filteredItems.findIndex(i => selectedPaths.has(i.path)) : -1);
+      if (idx >= 0) startInlineRename(idx);
+    }
     return;
   }
 
@@ -4886,6 +5375,15 @@ async function initApp() {
     document.getElementById("viewGridBtn").classList.remove("active");
     document.getElementById("viewDetailsBtn").classList.add("active");
   }
+
+  // Restore preview pane state
+  if (previewPaneVisible) {
+    document.getElementById("previewPane").classList.remove("hidden");
+    document.getElementById("previewToggleBtn").classList.add("active");
+  }
+
+  // Render favorites
+  renderFavorites();
 
   // Load system info first to get defaultDir
   await loadSystemInfo();
