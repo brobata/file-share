@@ -8,6 +8,28 @@ const crypto = require("crypto");
 
 const app = express();
 
+// --- Cookie helpers ---
+function parseCookies(cookieHeader) {
+  const cookies = {};
+  if (!cookieHeader) return cookies;
+  cookieHeader.split(";").forEach((c) => {
+    const [name, ...rest] = c.trim().split("=");
+    if (name) cookies[name] = decodeURIComponent(rest.join("="));
+  });
+  return cookies;
+}
+
+function setAuthCookie(res, token, rememberMe) {
+  const maxAge = rememberMe ? 30 * 24 * 60 * 60 : "";
+  let cookie = `auth=${token}; Path=/; HttpOnly; SameSite=Strict`;
+  if (maxAge) cookie += `; Max-Age=${maxAge}`;
+  res.setHeader("Set-Cookie", cookie);
+}
+
+function clearAuthCookie(res) {
+  res.setHeader("Set-Cookie", "auth=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0");
+}
+
 // --- Config system ---
 const CONFIG_PATH = path.join(__dirname, "data", "config.json");
 
@@ -17,7 +39,7 @@ function loadConfig() {
     port: 4040,
     sharedDir: path.join(os.homedir(), "shared"),
     allowFullFilesystem: false,
-    tokenExpiryMs: 0, // 0 = never expires
+    username: "admin",
   };
 
   let fileConfig = {};
@@ -43,6 +65,7 @@ function loadConfig() {
     const hash = crypto.createHash("sha256").update(process.env.PASSWORD + salt).digest("hex");
     merged.passwordHash = hash;
     merged.salt = salt;
+    if (!merged.username) merged.username = "admin";
     saveConfig(merged);
   }
 
@@ -55,11 +78,11 @@ function saveConfig(cfg) {
     fsSync.mkdirSync(dir, { recursive: true });
   }
   const persist = {
+    username: cfg.username,
     sharedDir: cfg.sharedDir,
     allowFullFilesystem: cfg.allowFullFilesystem,
     passwordHash: cfg.passwordHash,
     salt: cfg.salt,
-    tokenExpiryMs: cfg.tokenExpiryMs,
   };
   fsSync.writeFileSync(CONFIG_PATH, JSON.stringify(persist, null, 2));
 }
@@ -74,26 +97,28 @@ function verifyPassword(password) {
   return crypto.timingSafeEqual(Buffer.from(hash), Buffer.from(config.passwordHash));
 }
 
-// Token system: HMAC-based with optional expiry
-// Token format stored client-side: "<issuedAt>.<hmac>"
-function generateAuthToken() {
+// Token system: HMAC-based with per-token expiry
+// Token format: "<issuedAt>.<expiryMs>.<hmac>"
+function generateAuthToken(rememberMe) {
   const issuedAt = Date.now().toString();
-  const hmac = crypto.createHmac("sha256", config.passwordHash).update(issuedAt).digest("hex");
-  return issuedAt + "." + hmac;
+  const expiryMs = rememberMe ? (30 * 24 * 60 * 60 * 1000).toString() : (24 * 60 * 60 * 1000).toString();
+  const payload = issuedAt + "." + expiryMs;
+  const hmac = crypto.createHmac("sha256", config.passwordHash).update(payload).digest("hex");
+  return payload + "." + hmac;
 }
 
 function validateAuthToken(token) {
   if (!token || !config.passwordHash) return false;
-  const dot = token.indexOf(".");
-  if (dot === -1) return false;
-  const issuedAt = token.substring(0, dot);
-  const hmac = token.substring(dot + 1);
-  const expected = crypto.createHmac("sha256", config.passwordHash).update(issuedAt).digest("hex");
+  const parts = token.split(".");
+  if (parts.length !== 3) return false;
+  const [issuedAt, expiryMs, hmac] = parts;
+  const payload = issuedAt + "." + expiryMs;
+  const expected = crypto.createHmac("sha256", config.passwordHash).update(payload).digest("hex");
   if (!crypto.timingSafeEqual(Buffer.from(hmac), Buffer.from(expected))) return false;
-  // Check expiry
-  if (config.tokenExpiryMs > 0) {
+  const expiry = parseInt(expiryMs, 10);
+  if (expiry > 0) {
     const age = Date.now() - parseInt(issuedAt, 10);
-    if (age > config.tokenExpiryMs) return false;
+    if (age > expiry) return false;
   }
   return true;
 }
@@ -320,13 +345,13 @@ const upload = multer({ storage, limits: { fileSize: 500 * 1024 * 1024 } });
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Auth middleware
+// Auth middleware — reads token from httpOnly cookie
 function requireAuth(req, res, next) {
   if (!isConfigured()) {
     return res.status(503).json({ error: "Not configured", needsSetup: true });
   }
-  const token = req.headers["x-auth-token"];
-  if (validateAuthToken(token)) {
+  const cookies = parseCookies(req.headers.cookie);
+  if (validateAuthToken(cookies.auth)) {
     return next();
   }
   res.status(401).json({ error: "Unauthorized" });
@@ -345,7 +370,7 @@ app.post("/api/setup", rateLimit, (req, res) => {
     return res.status(400).json({ error: "Already configured" });
   }
 
-  const { password, sharedDir, allowFullFilesystem, tokenExpiryMs } = req.body;
+  const { username, password, sharedDir, allowFullFilesystem } = req.body;
   if (!password || password.length < 1) {
     return res.status(400).json({ error: "Password is required" });
   }
@@ -353,11 +378,11 @@ app.post("/api/setup", rateLimit, (req, res) => {
   const salt = crypto.randomBytes(16).toString("hex");
   const hash = crypto.createHash("sha256").update(password + salt).digest("hex");
 
+  config.username = (username || "admin").trim().toLowerCase();
   config.passwordHash = hash;
   config.salt = salt;
   if (sharedDir) config.sharedDir = sharedDir;
   if (allowFullFilesystem !== undefined) config.allowFullFilesystem = !!allowFullFilesystem;
-  if (tokenExpiryMs !== undefined) config.tokenExpiryMs = parseInt(tokenExpiryMs, 10) || 0;
 
   // Ensure shared directory exists
   try {
@@ -369,41 +394,55 @@ app.post("/api/setup", rateLimit, (req, res) => {
   }
 
   saveConfig(config);
-  const token = generateAuthToken();
+  const token = generateAuthToken(true);
+  setAuthCookie(res, token, true);
 
-  res.json({ ok: true, token });
+  res.json({ ok: true });
 });
 
-// Auth endpoint - verify password and return token
+// Auth endpoint - verify username + password, set cookie
 app.post("/api/auth", rateLimit, (req, res) => {
   if (!isConfigured()) {
     return res.status(503).json({ error: "Not configured", needsSetup: true });
   }
-  const { password } = req.body;
+  const { username, password, rememberMe } = req.body;
+
+  // Validate username
+  const expectedUser = (config.username || "admin").toLowerCase();
+  if ((username || "").trim().toLowerCase() !== expectedUser) {
+    return res.status(401).json({ error: "Invalid credentials" });
+  }
+
   if (verifyPassword(password)) {
-    const token = generateAuthToken();
-    res.json({ token, expiresIn: config.tokenExpiryMs || null });
+    const token = generateAuthToken(!!rememberMe);
+    setAuthCookie(res, token, !!rememberMe);
+    res.json({ ok: true });
   } else {
-    res.status(401).json({ error: "Invalid password" });
+    res.status(401).json({ error: "Invalid credentials" });
   }
 });
 
 // API: Get current settings (non-sensitive)
 app.get("/api/settings", requireAuth, (_req, res) => {
   res.json({
+    username: config.username || "admin",
     sharedDir: config.sharedDir,
     allowFullFilesystem: config.allowFullFilesystem,
-    tokenExpiryMs: config.tokenExpiryMs || 0,
   });
 });
 
 // API: Update settings
 app.post("/api/settings", requireAuth, (req, res) => {
-  const { currentPassword, newPassword, sharedDir, allowFullFilesystem, tokenExpiryMs } = req.body;
+  const { currentPassword, newPassword, newUsername, sharedDir, allowFullFilesystem } = req.body;
 
   // Require current password for any settings change
   if (!currentPassword || !verifyPassword(currentPassword)) {
     return res.status(401).json({ error: "Current password is incorrect" });
+  }
+
+  // Update username if provided
+  if (newUsername !== undefined && newUsername.trim()) {
+    config.username = newUsername.trim().toLowerCase();
   }
 
   // Update password if provided
@@ -435,24 +474,22 @@ app.post("/api/settings", requireAuth, (req, res) => {
     config.allowFullFilesystem = !!allowFullFilesystem;
   }
 
-  // Update token expiry
-  if (tokenExpiryMs !== undefined) {
-    config.tokenExpiryMs = parseInt(tokenExpiryMs, 10) || 0;
-  }
-
   saveConfig(config);
-  const token = generateAuthToken();
 
-  res.json({ ok: true, token, expiresIn: config.tokenExpiryMs || null });
+  // Re-issue cookie with new credentials
+  const token = generateAuthToken(true);
+  setAuthCookie(res, token, true);
+
+  res.json({ ok: true });
 });
 
 // Serve static frontend
 app.use("/static", express.static(path.join(__dirname, "public")));
 
-// Serve files from any path for previews (auth via query param for img src)
+// Serve files from any path for previews (auth via cookie)
 app.get("/files/{*filepath}", (req, res) => {
-  const token = req.headers["x-auth-token"] || req.query.token;
-  if (!validateAuthToken(token)) {
+  const cookies = parseCookies(req.headers.cookie);
+  if (!validateAuthToken(cookies.auth)) {
     return res.status(401).json({ error: "Unauthorized" });
   }
   try {
@@ -526,6 +563,8 @@ app.get("/api/list", requireAuth, async (req, res) => {
           isDirectory: entry.isDirectory(),
           size: stat.size,
           modified: stat.mtime,
+          created: stat.birthtime,
+          permissions: '0' + (stat.mode & 0o777).toString(8),
           path: fullPath,
         };
       })
@@ -550,6 +589,25 @@ app.post("/api/mkdir", requireAuth, async (req, res) => {
     const basePath = safePath(req.body.path || config.sharedDir);
     const dir = path.join(basePath, req.body.name);
     await fs.mkdir(dir, { recursive: true });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// API: Create empty file
+app.post("/api/touch", requireAuth, async (req, res) => {
+  try {
+    const basePath = safePath(req.body.path || config.sharedDir);
+    const filePath = path.join(basePath, req.body.name);
+    // Don't overwrite existing files
+    try {
+      await fs.access(filePath);
+      return res.status(400).json({ error: "File already exists" });
+    } catch {
+      // Good, doesn't exist
+    }
+    await fs.writeFile(filePath, "");
     res.json({ ok: true });
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -643,10 +701,16 @@ const MIME_TYPES = {
   '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
 };
 
-// API: Download file (accepts token via query param for direct links)
+// API: Logout — clear auth cookie
+app.post("/api/logout", (_req, res) => {
+  clearAuthCookie(res);
+  res.json({ ok: true });
+});
+
+// API: Download file (auth via cookie)
 app.get("/api/download", (req, res) => {
-  const token = req.headers["x-auth-token"] || req.query.token;
-  if (!validateAuthToken(token)) {
+  const cookies = parseCookies(req.headers.cookie);
+  if (!validateAuthToken(cookies.auth)) {
     return res.status(401).json({ error: "Unauthorized" });
   }
   try {

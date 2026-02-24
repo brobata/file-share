@@ -1535,10 +1535,138 @@
     background: var(--border);
   }
 
+  /* Details/List view */
+  .file-grid.details-view {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+  .details-header {
+    display: grid;
+    grid-template-columns: minmax(200px, 1fr) 180px 100px 100px;
+    gap: 0;
+    padding: 0 24px;
+    background: var(--surface);
+    border-bottom: 2px solid var(--border);
+    position: sticky;
+    top: 57px;
+    z-index: 50;
+    user-select: none;
+  }
+  .details-header.with-selection { top: 109px; }
+  .details-header .col-header {
+    padding: 8px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    border-right: 1px solid var(--border);
+    transition: background 0.1s;
+  }
+  .details-header .col-header:last-child { border-right: none; }
+  .details-header .col-header:hover { background: var(--surface2); color: var(--text); }
+  .details-header .col-header.sorted { color: var(--accent); }
+  .details-header .col-header .sort-arrow { font-size: 10px; }
+  .details-row {
+    display: grid;
+    grid-template-columns: minmax(200px, 1fr) 180px 100px 100px;
+    gap: 0;
+    padding: 0 24px;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    transition: background 0.1s;
+    position: relative;
+    background: var(--surface);
+  }
+  .details-row:hover { background: var(--surface2); }
+  .details-row.selected {
+    background: rgba(59,130,246,0.08);
+    border-color: rgba(59,130,246,0.2);
+  }
+  .details-row .detail-cell {
+    padding: 6px 12px;
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    min-height: 36px;
+  }
+  .details-row .detail-name {
+    gap: 8px;
+    font-weight: 500;
+  }
+  .details-row .detail-name svg { width: 18px; height: 18px; flex-shrink: 0; }
+  .details-row .detail-name .name-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .details-row .detail-date, .details-row .detail-type, .details-row .detail-size {
+    color: var(--text-muted);
+    font-size: 12px;
+  }
+  .details-row .checkbox {
+    position: absolute;
+    left: 4px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 20px;
+    height: 20px;
+    border: 2px solid var(--border);
+    border-radius: 5px;
+    background: var(--surface);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: all 0.15s ease;
+    z-index: 10;
+    cursor: pointer;
+  }
+  .details-row .checkbox svg { width: 12px; height: 12px; stroke: #fff; stroke-width: 3; opacity: 0; }
+  .details-row:hover .checkbox, .details-row.selected .checkbox, .has-selection .details-row .checkbox { opacity: 1; }
+  .details-row.selected .checkbox { background: var(--accent); border-color: var(--accent); }
+  .details-row.selected .checkbox svg { opacity: 1; }
+  .details-row.drag-over { background: rgba(34, 197, 94, 0.1); box-shadow: inset 0 0 0 1px var(--success); }
+
+  /* View toggle button */
+  .view-toggle {
+    display: flex;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  .view-toggle button {
+    width: 32px;
+    height: 32px;
+    border: none;
+    background: var(--surface2);
+    color: var(--text-muted);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s;
+  }
+  .view-toggle button:first-child { border-right: 1px solid var(--border); }
+  .view-toggle button:hover { background: var(--border); color: var(--text); }
+  .view-toggle button.active { background: var(--accent); color: #fff; }
+  .view-toggle button svg { width: 16px; height: 16px; }
+
+  /* Context menu separator */
+  .context-menu .ctx-sep { height: 1px; background: var(--border); margin: 4px 8px; }
+
   @media (max-width: 640px) {
     .nav-bar { padding: 6px 16px; gap: 2px; }
     .breadcrumb-wrapper { height: 30px; padding: 0 8px; }
     .status-bar { padding: 4px 16px; font-size: 11px; gap: 10px; }
+    .details-header, .details-row { grid-template-columns: minmax(150px, 1fr) 140px 80px; }
+    .details-header .col-header:nth-child(3), .details-row .detail-type { display: none; }
   }
   @media (max-width: 480px) {
     .nav-bar { padding: 4px 8px; gap: 2px; }
@@ -2015,6 +2143,14 @@
     </svg>
     Hidden
   </button>
+  <div class="view-toggle">
+    <button id="viewGridBtn" class="active" onclick="setViewMode('grid')" title="Grid view">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+    </button>
+    <button id="viewDetailsBtn" onclick="setViewMode('details')" title="Details view">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+    </button>
+  </div>
   <span class="results-count" id="resultsCount"></span>
 </div>
 
@@ -2074,25 +2210,8 @@
   <p>This folder is empty</p>
 </div>
 
-<!-- Context menu -->
-<div class="context-menu" id="contextMenu">
-  <button id="ctxDownload" onclick="downloadItem()">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-    <span>Download</span>
-  </button>
-  <button id="ctxCopyPath" onclick="copyItemPath()">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-    <span>Copy Path</span>
-  </button>
-  <button id="ctxRename" onclick="renameItem()">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>
-    <span>Rename</span>
-  </button>
-  <button id="ctxDelete" class="danger" onclick="deleteItem()">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-    <span>Delete</span>
-  </button>
-</div>
+<!-- Context menu (built dynamically) -->
+<div class="context-menu" id="contextMenu"></div>
 
 <!-- Rename modal -->
 <div class="modal-overlay" id="renameModal">
@@ -2114,6 +2233,18 @@
     <div class="modal-actions">
       <button class="btn" onclick="closeModal('folderModal')">Cancel</button>
       <button class="btn btn-primary" onclick="confirmFolder()">Create</button>
+    </div>
+  </div>
+</div>
+
+<!-- New File modal -->
+<div class="modal-overlay" id="newFileModal">
+  <div class="modal">
+    <h3>New File</h3>
+    <input type="text" id="newFileInput" placeholder="filename.txt" onkeydown="if(event.key==='Enter')confirmNewFile()">
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal('newFileModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="confirmNewFile()">Create</button>
     </div>
   </div>
 </div>
@@ -2166,6 +2297,7 @@ let sidebarCollapsed = localStorage.getItem("sidebarCollapsed") === "true";
 let showHiddenFiles = localStorage.getItem("showHiddenFiles") === "true";
 let navHistory = [];
 let navHistoryIndex = -1;
+let viewMode = localStorage.getItem("viewMode") || "grid";
 
 // Setup functions
 async function checkSetupNeeded() {
@@ -2436,7 +2568,7 @@ function applyFilterAndSort() {
     countEl.textContent = `${currentItems.length} items`;
   }
 
-  renderGrid(filteredItems);
+  renderCurrentView(filteredItems);
   updateStatusBar();
 }
 
@@ -3549,9 +3681,10 @@ function updateBreadcrumb() {
 function renderGrid(items) {
   const grid = document.getElementById("fileGrid");
   const empty = document.getElementById("emptyState");
+  grid.className = "file-grid";
 
   if (items.length === 0) {
-    grid.innerHTML = "";
+    grid.textContent = "";
     empty.style.display = searchQuery ? "none" : "block";
     if (searchQuery) {
       grid.innerHTML = '<div class="empty"><div class="icon">&#128269;</div><p>No files match your search</p></div>';
@@ -3594,6 +3727,210 @@ function renderGrid(items) {
       </div>
     `;
   }).join("");
+}
+
+function renderCurrentView(items) {
+  if (viewMode === "details") {
+    renderDetailsView(items);
+  } else {
+    renderGrid(items);
+  }
+}
+
+function setViewMode(mode) {
+  viewMode = mode;
+  localStorage.setItem("viewMode", mode);
+  document.getElementById("viewGridBtn").classList.toggle("active", mode === "grid");
+  document.getElementById("viewDetailsBtn").classList.toggle("active", mode === "details");
+  renderCurrentView(filteredItems);
+}
+
+function getFileType(name, isDir) {
+  if (isDir) return "Folder";
+  const ext = getExt(name);
+  if (!ext) return "File";
+  return ext.toUpperCase() + " File";
+}
+
+function renderDetailsView(items) {
+  const grid = document.getElementById("fileGrid");
+  const empty = document.getElementById("emptyState");
+
+  if (items.length === 0) {
+    grid.className = "file-grid details-view";
+    grid.textContent = "";
+    empty.style.display = searchQuery ? "none" : "block";
+    if (searchQuery) {
+      const emptyDiv = document.createElement("div");
+      emptyDiv.className = "empty";
+      emptyDiv.textContent = "No files match your search";
+      grid.appendChild(emptyDiv);
+    }
+    return;
+  }
+  empty.style.display = "none";
+  grid.className = "file-grid details-view";
+  grid.textContent = "";
+
+  // Build header
+  const sortArrow = currentSort.asc ? "\u25B2" : "\u25BC";
+  const header = document.createElement("div");
+  header.className = "details-header" + (selectedPaths.size > 0 ? " with-selection" : "");
+  header.id = "detailsHeader";
+  const cols = [
+    { label: "Name", field: "name" },
+    { label: "Date Modified", field: "date" },
+    { label: "Type", field: null },
+    { label: "Size", field: "size" },
+  ];
+  cols.forEach(col => {
+    const ch = document.createElement("div");
+    ch.className = "col-header" + (col.field && currentSort.field === col.field ? " sorted" : "");
+    ch.textContent = col.label + (col.field && currentSort.field === col.field ? " " + sortArrow : "");
+    if (col.field) ch.onclick = () => setSort(col.field);
+    header.appendChild(ch);
+  });
+  grid.appendChild(header);
+
+  // Build rows
+  const checkSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="20 6 9 17 4 12"/></svg>';
+  items.forEach((item, index) => {
+    const row = document.createElement("div");
+    row.className = "details-row" + (selectedPaths.has(item.path) ? " selected" : "");
+    row.dataset.index = index;
+    row.dataset.path = item.path;
+    row.dataset.isdir = item.isDirectory;
+    row.draggable = true;
+    row.ondragstart = (e) => handleDragStart(e, index);
+    row.ondragend = handleDragEnd;
+    if (item.isDirectory) {
+      row.ondragover = handleDragOver;
+      row.ondragleave = handleDragLeave;
+      row.ondrop = (e) => handleFileDrop(e, index);
+    }
+    row.onclick = (e) => handleClick(e, index);
+    row.oncontextmenu = (e) => showContext(e, index);
+
+    // Checkbox
+    const cb = document.createElement("div");
+    cb.className = "checkbox";
+    cb.onclick = (e) => { e.stopPropagation(); toggleSelect(index, e); };
+    cb.insertAdjacentHTML("afterbegin", checkSvg);
+    row.appendChild(cb);
+
+    // Name cell
+    const nameCell = document.createElement("div");
+    nameCell.className = "detail-cell detail-name";
+    const iconSpan = document.createElement("span");
+    iconSpan.style.display = "inline-flex";
+    iconSpan.insertAdjacentHTML("afterbegin", getFileIcon(item.name, item.isDirectory));
+    nameCell.appendChild(iconSpan);
+    const nameText = document.createElement("span");
+    nameText.className = "name-text";
+    nameText.title = item.name;
+    nameText.textContent = item.name;
+    nameCell.appendChild(nameText);
+    row.appendChild(nameCell);
+
+    // Date cell
+    const dateCell = document.createElement("div");
+    dateCell.className = "detail-cell detail-date";
+    dateCell.textContent = formatDate(item.modified);
+    row.appendChild(dateCell);
+
+    // Type cell
+    const typeCell = document.createElement("div");
+    typeCell.className = "detail-cell detail-type";
+    typeCell.textContent = getFileType(item.name, item.isDirectory);
+    row.appendChild(typeCell);
+
+    // Size cell
+    const sizeCell = document.createElement("div");
+    sizeCell.className = "detail-cell detail-size";
+    sizeCell.textContent = item.isDirectory ? "" : formatSize(item.size);
+    row.appendChild(sizeCell);
+
+    grid.appendChild(row);
+  });
+}
+
+// Dynamic context menu builder
+function buildContextMenu(menuItems) {
+  const menu = document.getElementById("contextMenu");
+  menu.textContent = "";
+  menuItems.forEach(item => {
+    if (item.separator) {
+      const sep = document.createElement("div");
+      sep.className = "ctx-sep";
+      menu.appendChild(sep);
+      return;
+    }
+    const btn = document.createElement("button");
+    if (item.danger) btn.className = "danger";
+    btn.onclick = item.fn;
+    if (item.icon) btn.insertAdjacentHTML("afterbegin", item.icon);
+    const span = document.createElement("span");
+    span.textContent = item.label;
+    btn.appendChild(span);
+    menu.appendChild(btn);
+  });
+  return menu;
+}
+
+function showEmptySpaceContext(event) {
+  event.preventDefault();
+  const items = [
+    { icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>', label: "New Folder", fn: () => { hideContextMenu(); createFolder(); } },
+    { icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>', label: "New File", fn: () => { hideContextMenu(); createNewFile(); } },
+    { separator: true },
+  ];
+  if (typeof clipboard !== "undefined" && clipboard && clipboard.paths && clipboard.paths.length > 0) {
+    items.push({ icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>', label: "Paste", fn: () => { hideContextMenu(); pasteItems(); } });
+    items.push({ separator: true });
+  }
+  items.push({ icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>', label: "Refresh", fn: () => { hideContextMenu(); navigate(currentPath); } });
+  items.push({ icon: viewMode === "grid" ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>' : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>', label: viewMode === "grid" ? "Details View" : "Grid View", fn: () => { hideContextMenu(); setViewMode(viewMode === "grid" ? "details" : "grid"); } });
+
+  buildContextMenu(items);
+  const menu = document.getElementById("contextMenu");
+  menu.classList.add("visible");
+  const menuW = menu.offsetWidth;
+  const menuH = menu.offsetHeight;
+  menu.style.left = Math.max(0, Math.min(event.clientX, window.innerWidth - menuW - 8)) + "px";
+  menu.style.top = Math.max(0, Math.min(event.clientY, window.innerHeight - menuH - 8)) + "px";
+}
+
+function hideContextMenu() {
+  document.getElementById("contextMenu").classList.remove("visible");
+}
+
+// New file creation
+function createNewFile() {
+  document.getElementById("newFileInput").value = "";
+  document.getElementById("newFileModal").classList.add("visible");
+  setTimeout(() => document.getElementById("newFileInput").focus(), 50);
+}
+
+async function confirmNewFile() {
+  const name = document.getElementById("newFileInput").value.trim();
+  if (!name) return;
+  try {
+    const res = await fetch("/api/touch", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: currentPath, name }),
+    });
+    if (res.ok) {
+      toast("Created file: " + name, "success");
+      closeModal("newFileModal");
+      navigate(currentPath);
+    } else {
+      const err = await res.json();
+      toast(err.error || "Failed to create file", "error");
+    }
+  } catch {
+    toast("Failed to create file", "error");
+  }
 }
 
 // Drag to move functionality
@@ -3787,49 +4124,51 @@ function showContext(event, index) {
     clearSelection();
     selectedPaths.add(item.path);
     lastSelectedIndex = index;
-    const el = document.querySelector(`.file-item[data-index="${index}"]`);
+    const el = document.querySelector(`.file-item[data-index="${index}"], .details-row[data-index="${index}"]`);
     if (el) el.classList.add("selected");
     updateSelectionUI();
   }
 
   contextTarget = item;
-
-  // Update context menu labels based on selection count
   const count = selectedPaths.size;
-  const ctxDownload = document.getElementById("ctxDownload");
-  const ctxRename = document.getElementById("ctxRename");
-  const ctxDelete = document.getElementById("ctxDelete");
-  const ctxCopyPath = document.getElementById("ctxCopyPath");
+  const dlIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
+  const cpIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+  const renIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>';
+  const delIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
 
-  if (count > 1) {
-    ctxDownload.querySelector("span").textContent = `Download ${count} items`;
-    ctxRename.style.display = "none";
-    ctxCopyPath.style.display = "none";
-    ctxDelete.querySelector("span").textContent = `Delete ${count} items`;
-  } else {
-    ctxDownload.querySelector("span").textContent = "Download";
-    ctxRename.style.display = "flex";
-    ctxCopyPath.style.display = "flex";
-    ctxDelete.querySelector("span").textContent = "Delete";
+  const menuItems = [
+    { icon: dlIcon, label: count > 1 ? "Download " + count + " items" : "Download", fn: () => { hideContextMenu(); downloadItem(); } },
+  ];
+  if (count === 1) {
+    menuItems.push({ icon: cpIcon, label: "Copy Path", fn: () => { hideContextMenu(); copyItemPath(); } });
+    menuItems.push({ icon: renIcon, label: "Rename", fn: () => { hideContextMenu(); renameItem(); } });
   }
+  menuItems.push({ separator: true });
+  menuItems.push({ icon: delIcon, label: count > 1 ? "Delete " + count + " items" : "Delete", danger: true, fn: () => { hideContextMenu(); deleteItem(); } });
 
+  buildContextMenu(menuItems);
   const menu = document.getElementById("contextMenu");
   menu.classList.add("visible");
   const menuW = menu.offsetWidth;
   const menuH = menu.offsetHeight;
-  const x = Math.min(event.clientX, window.innerWidth - menuW - 8);
-  const y = Math.min(event.clientY, window.innerHeight - menuH - 8);
-  menu.style.left = Math.max(0, x) + "px";
-  menu.style.top = Math.max(0, y) + "px";
+  menu.style.left = Math.max(0, Math.min(event.clientX, window.innerWidth - menuW - 8)) + "px";
+  menu.style.top = Math.max(0, Math.min(event.clientY, window.innerHeight - menuH - 8)) + "px";
 }
 
 document.addEventListener("click", (e) => {
-  document.getElementById("contextMenu").classList.remove("visible");
+  hideContextMenu();
+});
+
+// Right-click on empty grid space
+document.getElementById("fileGrid").addEventListener("contextmenu", (e) => {
+  if (e.target.id === "fileGrid" || e.target.classList.contains("details-view")) {
+    showEmptySpaceContext(e);
+  }
 });
 
 // Clear selection when clicking on empty grid space
 document.getElementById("fileGrid").addEventListener("click", (e) => {
-  if (e.target.id === "fileGrid") {
+  if (e.target.id === "fileGrid" || e.target.classList.contains("details-view")) {
     clearSelection();
   }
 });
@@ -4153,6 +4492,12 @@ async function initApp() {
 
   // Restore hidden files toggle state
   updateHiddenToggle();
+
+  // Restore view mode
+  if (viewMode === "details") {
+    document.getElementById("viewGridBtn").classList.remove("active");
+    document.getElementById("viewDetailsBtn").classList.add("active");
+  }
 
   // Load system info first to get defaultDir
   await loadSystemInfo();
