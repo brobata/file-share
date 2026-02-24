@@ -1853,7 +1853,7 @@
     justify-content: center;
     transition: all 0.15s;
   }
-  .view-toggle button:first-child { border-right: 1px solid var(--border); }
+  .view-toggle button:not(:last-child) { border-right: 1px solid var(--border); }
   .view-toggle button:hover { background: var(--border); color: var(--text); }
   .view-toggle button.active { background: var(--accent); color: #fff; }
   .view-toggle button svg { width: 16px; height: 16px; }
@@ -2063,6 +2063,362 @@
       padding: 40px 16px;
     }
   }
+
+  /* ===== MOBILE-NATIVE FEATURES ===== */
+
+  /* Bottom Action Sheet (mobile only) */
+  .bottom-sheet-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.5);
+    z-index: 500;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+  }
+  .bottom-sheet-overlay.visible {
+    display: block;
+    opacity: 1;
+  }
+  .bottom-sheet {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: var(--surface);
+    border-radius: 16px 16px 0 0;
+    z-index: 501;
+    transform: translateY(100%);
+    transition: transform 0.3s cubic-bezier(0.32, 0.72, 0, 1);
+    max-height: 70vh;
+    display: flex;
+    flex-direction: column;
+    padding-bottom: env(safe-area-inset-bottom, 0);
+  }
+  .bottom-sheet.visible {
+    transform: translateY(0);
+  }
+  .bottom-sheet-handle {
+    width: 36px;
+    height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    margin: 10px auto 6px;
+    flex-shrink: 0;
+  }
+  .bottom-sheet-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 20px 12px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .bottom-sheet-header .bs-icon {
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--surface2);
+    border-radius: 10px;
+    font-size: 20px;
+    flex-shrink: 0;
+  }
+  .bottom-sheet-header .bs-info {
+    flex: 1;
+    min-width: 0;
+  }
+  .bottom-sheet-header .bs-name {
+    font-size: 14px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .bottom-sheet-header .bs-meta {
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+  .bottom-sheet-actions {
+    overflow-y: auto;
+    padding: 6px 8px 12px;
+    flex: 1;
+  }
+  .bottom-sheet-actions button {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    width: 100%;
+    padding: 14px 16px;
+    border: none;
+    border-radius: 12px;
+    background: transparent;
+    color: var(--text);
+    font-size: 15px;
+    cursor: pointer;
+    text-align: left;
+  }
+  .bottom-sheet-actions button:active {
+    background: var(--surface2);
+  }
+  .bottom-sheet-actions button.danger {
+    color: var(--danger);
+  }
+  .bottom-sheet-actions button svg {
+    width: 22px;
+    height: 22px;
+    flex-shrink: 0;
+  }
+  .bottom-sheet-separator {
+    height: 1px;
+    background: var(--border);
+    margin: 4px 16px;
+  }
+
+  /* Pull-to-Refresh indicator */
+  .pull-indicator {
+    display: none;
+    position: absolute;
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%) translateY(-50px);
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    box-shadow: 0 2px 12px rgba(0,0,0,0.15);
+    align-items: center;
+    justify-content: center;
+    z-index: 50;
+    transition: transform 0.2s ease;
+  }
+  .pull-indicator.active {
+    display: flex;
+  }
+  .pull-indicator svg {
+    width: 20px;
+    height: 20px;
+    color: var(--accent);
+    transition: transform 0.2s ease;
+  }
+  .pull-indicator.ready svg {
+    transform: rotate(180deg);
+  }
+  .pull-indicator.refreshing svg {
+    animation: ptr-spin 0.8s linear infinite;
+  }
+  @keyframes ptr-spin {
+    to { transform: rotate(360deg); }
+  }
+
+  /* FAB (Floating Action Button) — mobile only */
+  .fab {
+    display: none;
+    position: fixed;
+    bottom: 24px;
+    right: 20px;
+    width: 56px;
+    height: 56px;
+    border-radius: 16px;
+    background: var(--accent);
+    color: white;
+    border: none;
+    box-shadow: 0 4px 16px rgba(59,130,246,0.4);
+    align-items: center;
+    justify-content: center;
+    z-index: 200;
+    cursor: pointer;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+  }
+  .fab:active {
+    transform: scale(0.92);
+  }
+  .fab svg {
+    width: 26px;
+    height: 26px;
+    transition: transform 0.2s ease;
+  }
+  .fab.open svg {
+    transform: rotate(45deg);
+  }
+  .fab-menu {
+    display: none;
+    position: fixed;
+    bottom: 90px;
+    right: 20px;
+    flex-direction: column;
+    gap: 10px;
+    z-index: 199;
+    opacity: 0;
+    transform: translateY(10px);
+    transition: opacity 0.2s ease, transform 0.2s ease;
+  }
+  .fab-menu.visible {
+    display: flex;
+    opacity: 1;
+    transform: translateY(0);
+  }
+  .fab-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-direction: row-reverse;
+    cursor: pointer;
+  }
+  .fab-menu-item button {
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+    cursor: pointer;
+  }
+  .fab-menu-item button:active {
+    background: var(--surface2);
+  }
+  .fab-menu-item button svg {
+    width: 20px;
+    height: 20px;
+  }
+  .fab-menu-item span {
+    font-size: 13px;
+    font-weight: 500;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 6px 12px;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    white-space: nowrap;
+  }
+
+  /* Bottom Tab Bar — mobile only */
+  .bottom-tabs {
+    display: none;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 56px;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    z-index: 200;
+    padding-bottom: env(safe-area-inset-bottom, 0);
+  }
+  .bottom-tabs-inner {
+    display: flex;
+    height: 56px;
+  }
+  .bottom-tab {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 10px;
+    font-weight: 500;
+    cursor: pointer;
+    padding: 4px 0;
+    position: relative;
+  }
+  .bottom-tab.active {
+    color: var(--accent);
+  }
+  .bottom-tab svg {
+    width: 22px;
+    height: 22px;
+  }
+
+  /* Edge swipe indicators */
+  .edge-indicator {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    width: 40px;
+    z-index: 450;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .edge-indicator.left { left: 0; background: linear-gradient(to right, rgba(59,130,246,0.15), transparent); }
+  .edge-indicator.right { right: 0; background: linear-gradient(to left, rgba(59,130,246,0.15), transparent); }
+  .edge-indicator.active { opacity: 1; }
+  .edge-indicator svg { width: 24px; height: 24px; color: var(--accent); }
+
+  /* Compact list view */
+  .file-grid.compact-view {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    padding: 0;
+  }
+  .compact-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: 40px;
+    padding: 0 12px;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    user-select: none;
+    font-size: 13px;
+  }
+  .compact-row:active {
+    background: var(--surface2);
+  }
+  .compact-row.selected {
+    background: rgba(59,130,246,0.12);
+  }
+  .compact-row .compact-icon {
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .compact-row .compact-icon svg {
+    width: 18px;
+    height: 18px;
+  }
+  .compact-row .compact-name {
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .compact-row .compact-size {
+    color: var(--text-muted);
+    font-size: 11px;
+    flex-shrink: 0;
+  }
+
+  @media (max-width: 767px) {
+    .fab { display: flex; }
+    .bottom-tabs { display: block; }
+    .file-grid { padding-bottom: 70px; }
+    .file-grid.details-view { padding-bottom: 70px; }
+    .fab { bottom: 76px; }
+    .fab-menu { bottom: 142px; }
+    .toast-container { bottom: 70px; }
+    .selection-bar { bottom: 56px; }
+    /* Hide desktop context menu on mobile */
+    .context-menu { display: none !important; }
+  }
 </style>
 </head>
 <body>
@@ -2203,6 +2559,71 @@
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
     Log Out
   </button>
+</div>
+
+<!-- Bottom Action Sheet (mobile) -->
+<div class="bottom-sheet-overlay" id="bottomSheetOverlay" onclick="hideBottomSheet()"></div>
+<div class="bottom-sheet" id="bottomSheet">
+  <div class="bottom-sheet-handle"></div>
+  <div class="bottom-sheet-header" id="bottomSheetHeader"></div>
+  <div class="bottom-sheet-actions" id="bottomSheetActions"></div>
+</div>
+
+<!-- Pull-to-Refresh indicator -->
+<div class="pull-indicator" id="pullIndicator">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="7 13 12 18 17 13"/><line x1="12" y1="2" x2="12" y2="18"/></svg>
+</div>
+
+<!-- Edge swipe indicators -->
+<div class="edge-indicator left" id="edgeLeft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg></div>
+<div class="edge-indicator right" id="edgeRight"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg></div>
+
+<!-- FAB (Floating Action Button) -->
+<button class="fab" id="fab" onclick="toggleFab()">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+</button>
+<div class="fab-menu" id="fabMenu">
+  <div class="fab-menu-item" onclick="closeFab(); fileInput.click();">
+    <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg></button>
+    <span>Upload Files</span>
+  </div>
+  <div class="fab-menu-item" onclick="closeFab(); createFolder();">
+    <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg></button>
+    <span>New Folder</span>
+  </div>
+  <div class="fab-menu-item" onclick="closeFab(); createNewFile();">
+    <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg></button>
+    <span>New File</span>
+  </div>
+  <div class="fab-menu-item" id="fabCameraItem" onclick="closeFab(); openCamera();" style="display:none;">
+    <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg></button>
+    <span>Take Photo</span>
+  </div>
+</div>
+
+<!-- Camera input (mobile) -->
+<input type="file" id="cameraInput" accept="image/*" capture="environment" hidden onchange="uploadFiles(this.files)">
+
+<!-- Bottom Tab Bar (mobile) -->
+<div class="bottom-tabs" id="bottomTabs">
+  <div class="bottom-tabs-inner">
+    <button class="bottom-tab active" id="tabFiles" onclick="switchTab('files')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+      Files
+    </button>
+    <button class="bottom-tab" id="tabFavorites" onclick="switchTab('favorites')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+      Favorites
+    </button>
+    <button class="bottom-tab" id="tabUpload" onclick="switchTab('upload')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+      Upload
+    </button>
+    <button class="bottom-tab" id="tabSettings" onclick="switchTab('settings')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      Settings
+    </button>
+  </div>
 </div>
 
 <div class="app-layout">
@@ -2353,6 +2774,9 @@
     </button>
     <button id="viewDetailsBtn" onclick="setViewMode('details')" title="Details view">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+    </button>
+    <button id="viewCompactBtn" onclick="setViewMode('compact')" title="Compact view">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
     </button>
   </div>
   <button class="sort-btn" id="previewToggleBtn" onclick="togglePreviewPane()" title="Toggle preview pane">
@@ -5803,6 +6227,632 @@ async function initApp() {
   navigate(defaultDir, { pushHistory: false });
   updateStatusBar();
 }
+
+// ===== MOBILE-NATIVE FEATURES =====
+
+function isMobile() { return window.innerWidth < 768; }
+function haptic(ms) { if (navigator.vibrate) navigator.vibrate(ms); }
+
+// --- Bottom Action Sheet ---
+let bottomSheetDragY = 0;
+let bottomSheetDragging = false;
+
+function showBottomSheet(menuItems, headerItem) {
+  haptic(15);
+  const overlay = document.getElementById("bottomSheetOverlay");
+  const sheet = document.getElementById("bottomSheet");
+  const header = document.getElementById("bottomSheetHeader");
+  const actions = document.getElementById("bottomSheetActions");
+
+  // Build header using safe DOM methods
+  if (headerItem) {
+    const iconSvg = headerItem.isDirectory ? getFileIcon(headerItem.name, true) : getFileIcon(headerItem.name, false);
+    const meta = headerItem.isDirectory ? "Folder" : formatSize(headerItem.size);
+    while (header.firstChild) header.removeChild(header.firstChild);
+    const iconDiv = document.createElement("div");
+    iconDiv.className = "bs-icon";
+    // getFileIcon returns internal SVG markup (not user data)
+    const iconTemplate = document.createElement("template");
+    iconTemplate.innerHTML = iconSvg;
+    iconDiv.appendChild(iconTemplate.content);
+    const infoDiv = document.createElement("div");
+    infoDiv.className = "bs-info";
+    const nameDiv = document.createElement("div");
+    nameDiv.className = "bs-name";
+    nameDiv.textContent = headerItem.name;
+    const metaDiv = document.createElement("div");
+    metaDiv.className = "bs-meta";
+    metaDiv.textContent = meta;
+    infoDiv.appendChild(nameDiv);
+    infoDiv.appendChild(metaDiv);
+    header.appendChild(iconDiv);
+    header.appendChild(infoDiv);
+    header.style.display = "flex";
+  } else {
+    header.style.display = "none";
+  }
+
+  // Build actions
+  actions.textContent = "";
+  menuItems.forEach(item => {
+    if (item.separator) {
+      const sep = document.createElement("div");
+      sep.className = "bottom-sheet-separator";
+      actions.appendChild(sep);
+      return;
+    }
+    const btn = document.createElement("button");
+    if (item.danger) btn.className = "danger";
+    btn.onclick = () => { hideBottomSheet(); setTimeout(item.fn, 200); };
+    if (item.icon) {
+      // Icons are internal SVG strings, not user data
+      const iconTemplate = document.createElement("template");
+      iconTemplate.innerHTML = item.icon;
+      btn.appendChild(iconTemplate.content);
+    }
+    const span = document.createElement("span");
+    span.textContent = item.label;
+    btn.appendChild(span);
+    actions.appendChild(btn);
+  });
+
+  overlay.classList.add("visible");
+  requestAnimationFrame(() => sheet.classList.add("visible"));
+
+  // Swipe-down on handle to close
+  const handle = sheet.querySelector(".bottom-sheet-handle");
+  handle.ontouchstart = (e) => {
+    bottomSheetDragY = e.touches[0].clientY;
+    bottomSheetDragging = true;
+  };
+  handle.ontouchmove = (e) => {
+    if (!bottomSheetDragging) return;
+    const dy = e.touches[0].clientY - bottomSheetDragY;
+    if (dy > 0) sheet.style.transform = `translateY(${dy}px)`;
+  };
+  handle.ontouchend = (e) => {
+    if (!bottomSheetDragging) return;
+    bottomSheetDragging = false;
+    const dy = e.changedTouches[0].clientY - bottomSheetDragY;
+    if (dy > 80) {
+      hideBottomSheet();
+    } else {
+      sheet.style.transform = "";
+      sheet.classList.add("visible");
+    }
+  };
+}
+
+function hideBottomSheet() {
+  const overlay = document.getElementById("bottomSheetOverlay");
+  const sheet = document.getElementById("bottomSheet");
+  sheet.classList.remove("visible");
+  sheet.style.transform = "";
+  setTimeout(() => overlay.classList.remove("visible"), 300);
+}
+
+// --- Override showContext & showEmptySpaceContext for mobile ---
+const _originalShowContext = showContext;
+showContext = function(event, index) {
+  if (isMobile()) {
+    event.preventDefault();
+    const item = filteredItems[index];
+    if (!item) return;
+    if (!selectedPaths.has(item.path)) {
+      clearSelection();
+      selectedPaths.add(item.path);
+      lastSelectedIndex = index;
+      const el = document.querySelector(`.file-item[data-index="${index}"], .details-row[data-index="${index}"], .compact-row[data-index="${index}"]`);
+      if (el) el.classList.add("selected");
+      updateSelectionUI();
+    }
+    contextTarget = item;
+    const count = selectedPaths.size;
+    const dlIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
+    const cpIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+    const renIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>';
+    const delIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
+    const cutIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="20" y1="4" x2="8.12" y2="15.88"/><line x1="14.47" y1="14.48" x2="20" y2="20"/><line x1="8.12" y1="8.12" x2="12" y2="12"/></svg>';
+    const shareIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>';
+    const starIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>';
+    const propsIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>';
+
+    const menuItems = [
+      { icon: dlIcon, label: count > 1 ? `Download ${count} items` : "Download", fn: () => downloadItem() },
+    ];
+    if (count === 1 && navigator.share) {
+      menuItems.push({ icon: shareIcon, label: "Share", fn: () => shareFile(item) });
+    }
+    if (count === 1) {
+      menuItems.push({ icon: cpIcon, label: "Copy Path", fn: () => copyItemPath() });
+      menuItems.push({ icon: renIcon, label: "Rename", fn: () => renameItem() });
+    }
+    if (count > 1) {
+      menuItems.push({ icon: renIcon, label: "Batch Rename", fn: () => openBatchRename() });
+    }
+    menuItems.push({ separator: true });
+    menuItems.push({ icon: cpIcon, label: "Copy", fn: () => copySelected() });
+    menuItems.push({ icon: cutIcon, label: "Cut", fn: () => cutSelected() });
+    if (clipboard.paths.length > 0) {
+      menuItems.push({ icon: cpIcon, label: "Paste", fn: () => pasteItems() });
+    }
+    menuItems.push({ separator: true });
+    menuItems.push({ icon: delIcon, label: count > 1 ? `Delete ${count} items` : "Delete", danger: true, fn: () => deleteItem() });
+    if (count === 1) {
+      menuItems.push({ separator: true });
+      if (item.isDirectory) {
+        const isPinned = favorites.includes(item.path);
+        menuItems.push({ icon: starIcon, label: isPinned ? "Unpin from Favorites" : "Pin to Favorites", fn: () => { if (isPinned) { favorites.splice(favorites.indexOf(item.path), 1); } else { favorites.push(item.path); } saveFavorites(); renderFavorites(); } });
+      }
+      menuItems.push({ icon: propsIcon, label: "Properties", fn: () => showProperties(contextTarget.path) });
+    }
+    showBottomSheet(menuItems, item);
+  } else {
+    _originalShowContext(event, index);
+  }
+};
+
+const _originalShowEmptySpaceContext = showEmptySpaceContext;
+showEmptySpaceContext = function(event) {
+  if (isMobile()) {
+    event.preventDefault();
+    const items = [
+      { icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>', label: "New Folder", fn: () => createFolder() },
+      { icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>', label: "New File", fn: () => createNewFile() },
+      { separator: true },
+    ];
+    if (typeof clipboard !== "undefined" && clipboard && clipboard.paths && clipboard.paths.length > 0) {
+      items.push({ icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2-2v1"/></svg>', label: "Paste", fn: () => pasteItems() });
+      items.push({ separator: true });
+    }
+    items.push({ icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>', label: "Refresh", fn: () => navigate(currentPath) });
+    showBottomSheet(items, null);
+  } else {
+    _originalShowEmptySpaceContext(event);
+  }
+};
+
+// --- Long-Press to Select ---
+let longPressTimer = null;
+let longPressFired = false;
+let touchStartX = 0, touchStartY = 0, touchStartTime = 0;
+let touchMoved = false;
+
+function initTouchHandlers() {
+  if (!isMobile()) return;
+
+  const grid = document.getElementById("fileGrid");
+
+  grid.addEventListener("touchstart", (e) => {
+    const item = e.target.closest(".file-item, .details-row, .compact-row");
+    if (!item) return;
+    const index = parseInt(item.dataset.index);
+    if (isNaN(index)) return;
+
+    touchStartX = e.touches[0].clientX;
+    touchStartY = e.touches[0].clientY;
+    touchStartTime = Date.now();
+    touchMoved = false;
+    longPressFired = false;
+
+    longPressTimer = setTimeout(() => {
+      longPressFired = true;
+      haptic(50);
+      toggleSelect(index, {});
+    }, 500);
+  }, { passive: true });
+
+  grid.addEventListener("touchmove", (e) => {
+    if (longPressTimer) {
+      const dx = Math.abs(e.touches[0].clientX - touchStartX);
+      const dy = Math.abs(e.touches[0].clientY - touchStartY);
+      if (dx > 10 || dy > 10) {
+        clearTimeout(longPressTimer);
+        longPressTimer = null;
+        touchMoved = true;
+      }
+    }
+  }, { passive: true });
+
+  grid.addEventListener("touchend", () => {
+    if (longPressTimer) {
+      clearTimeout(longPressTimer);
+      longPressTimer = null;
+    }
+  }, { passive: true });
+}
+
+// Override handleClick for mobile selection mode
+const _originalHandleClick = handleClick;
+handleClick = function(event, index) {
+  if (isMobile() && longPressFired) {
+    longPressFired = false;
+    return;
+  }
+  if (isMobile() && touchMoved) {
+    touchMoved = false;
+    return;
+  }
+  if (isMobile() && selectedPaths.size > 0) {
+    event.preventDefault();
+    event.stopPropagation();
+    haptic(20);
+    toggleSelect(index, {});
+    return;
+  }
+  _originalHandleClick(event, index);
+};
+
+// --- Pull-to-Refresh ---
+let pullStartY = 0;
+let isPulling = false;
+let pullIndicatorEl = null;
+
+function initPullToRefresh() {
+  if (!isMobile()) return;
+  pullIndicatorEl = document.getElementById("pullIndicator");
+  const grid = document.getElementById("fileGrid");
+
+  grid.addEventListener("touchstart", (e) => {
+    if (grid.scrollTop === 0 && !isPulling) {
+      pullStartY = e.touches[0].clientY;
+    }
+  }, { passive: true });
+
+  grid.addEventListener("touchmove", (e) => {
+    if (grid.scrollTop > 0 || pullStartY === 0) return;
+    const dy = e.touches[0].clientY - pullStartY;
+    if (dy > 10 && dy < 150) {
+      isPulling = true;
+      pullIndicatorEl.classList.add("active");
+      pullIndicatorEl.style.transform = `translateX(-50%) translateY(${dy - 30}px)`;
+      if (dy > 60) {
+        pullIndicatorEl.classList.add("ready");
+      } else {
+        pullIndicatorEl.classList.remove("ready");
+      }
+    }
+  }, { passive: true });
+
+  grid.addEventListener("touchend", () => {
+    if (!isPulling) { pullStartY = 0; return; }
+    const indicator = pullIndicatorEl;
+    if (indicator.classList.contains("ready")) {
+      indicator.classList.remove("ready");
+      indicator.classList.add("refreshing");
+      navigate(currentPath).then(() => {
+        setTimeout(() => {
+          indicator.classList.remove("active", "refreshing");
+          indicator.style.transform = "";
+        }, 400);
+      });
+    } else {
+      indicator.classList.remove("active", "ready");
+      indicator.style.transform = "";
+    }
+    isPulling = false;
+    pullStartY = 0;
+  }, { passive: true });
+}
+
+// --- FAB ---
+let fabOpen = false;
+
+function toggleFab() {
+  fabOpen = !fabOpen;
+  haptic(20);
+  const fab = document.getElementById("fab");
+  const menu = document.getElementById("fabMenu");
+  fab.classList.toggle("open", fabOpen);
+  menu.classList.toggle("visible", fabOpen);
+
+  // Show camera item on mobile if available
+  const cameraItem = document.getElementById("fabCameraItem");
+  if (cameraItem && isMobile()) {
+    cameraItem.style.display = "flex";
+  }
+}
+
+function closeFab() {
+  fabOpen = false;
+  document.getElementById("fab").classList.remove("open");
+  document.getElementById("fabMenu").classList.remove("visible");
+}
+
+// Close FAB on outside tap
+document.addEventListener("click", (e) => {
+  if (fabOpen && !e.target.closest(".fab") && !e.target.closest(".fab-menu")) {
+    closeFab();
+  }
+});
+
+// Hide FAB when selection is active
+const _originalUpdateSelectionUI = updateSelectionUI;
+updateSelectionUI = function() {
+  _originalUpdateSelectionUI();
+  const fab = document.getElementById("fab");
+  if (fab) {
+    fab.style.display = (selectedPaths.size > 0 || !isMobile()) ? "none" : "flex";
+  }
+};
+
+// --- Camera Upload ---
+function openCamera() {
+  document.getElementById("cameraInput").click();
+}
+
+// --- Swipe Navigation (Back/Forward) ---
+let edgeSwipeActive = false;
+let edgeSwipeSide = null;
+let edgeSwipeStartX = 0;
+
+function initEdgeSwipe() {
+  if (!isMobile()) return;
+
+  document.addEventListener("touchstart", (e) => {
+    const x = e.touches[0].clientX;
+    const w = window.innerWidth;
+    if (x < 20) {
+      edgeSwipeActive = true;
+      edgeSwipeSide = "left";
+      edgeSwipeStartX = x;
+    } else if (x > w - 20) {
+      edgeSwipeActive = true;
+      edgeSwipeSide = "right";
+      edgeSwipeStartX = x;
+    }
+  }, { passive: true });
+
+  document.addEventListener("touchmove", (e) => {
+    if (!edgeSwipeActive) return;
+    const dx = Math.abs(e.touches[0].clientX - edgeSwipeStartX);
+    if (dx > 30) {
+      document.getElementById(edgeSwipeSide === "left" ? "edgeLeft" : "edgeRight").classList.add("active");
+    }
+  }, { passive: true });
+
+  document.addEventListener("touchend", (e) => {
+    if (!edgeSwipeActive) { return; }
+    const dx = e.changedTouches[0].clientX - edgeSwipeStartX;
+    document.getElementById("edgeLeft").classList.remove("active");
+    document.getElementById("edgeRight").classList.remove("active");
+    if (edgeSwipeSide === "left" && dx > 80) {
+      navigateBack();
+    } else if (edgeSwipeSide === "right" && dx < -80) {
+      navigateForward();
+    }
+    edgeSwipeActive = false;
+    edgeSwipeSide = null;
+  }, { passive: true });
+}
+
+// --- Web Share API ---
+async function shareFile(item) {
+  if (!navigator.share || !item || item.isDirectory) return;
+  const url = window.location.origin + "/api/download?path=" + encodeURIComponent(item.path);
+  try {
+    await navigator.share({ title: item.name, url: url });
+  } catch (err) {
+    if (err.name !== "AbortError") console.error("Share failed:", err);
+  }
+}
+
+// --- Bottom Tab Bar ---
+function switchTab(tab) {
+  document.querySelectorAll(".bottom-tab").forEach(t => t.classList.remove("active"));
+  if (tab === "files") {
+    document.getElementById("tabFiles").classList.add("active");
+    if (defaultDir) navigate(defaultDir);
+  } else if (tab === "favorites") {
+    document.getElementById("tabFavorites").classList.add("active");
+    if (sidebarCollapsed) toggleSidebar();
+  } else if (tab === "upload") {
+    document.getElementById("tabUpload").classList.add("active");
+    fileInput.click();
+    setTimeout(() => {
+      document.getElementById("tabUpload").classList.remove("active");
+      document.getElementById("tabFiles").classList.add("active");
+    }, 500);
+  } else if (tab === "settings") {
+    document.getElementById("tabSettings").classList.add("active");
+    openSettings();
+    setTimeout(() => {
+      document.getElementById("tabSettings").classList.remove("active");
+      document.getElementById("tabFiles").classList.add("active");
+    }, 500);
+  }
+}
+
+// --- Compact List View ---
+function renderCompactView(items) {
+  const grid = document.getElementById("fileGrid");
+  const empty = document.getElementById("emptyState");
+  grid.className = "file-grid compact-view";
+
+  if (items.length === 0) {
+    grid.textContent = "";
+    empty.style.display = searchQuery ? "none" : "block";
+    if (searchQuery) {
+      const emptyDiv = document.createElement("div");
+      emptyDiv.className = "empty";
+      const iconDiv = document.createElement("div");
+      iconDiv.className = "icon";
+      iconDiv.textContent = "\u{1F50D}";
+      const p = document.createElement("p");
+      p.textContent = "No files match your search";
+      emptyDiv.appendChild(iconDiv);
+      emptyDiv.appendChild(p);
+      grid.appendChild(emptyDiv);
+    }
+    return;
+  }
+  empty.style.display = "none";
+
+  grid.textContent = "";
+  items.forEach((item, index) => {
+    const isSelected = selectedPaths.has(item.path);
+    const row = document.createElement("div");
+    row.className = "compact-row" + (isSelected ? " selected" : "");
+    row.dataset.index = index;
+    row.dataset.path = item.path;
+    row.dataset.isdir = item.isDirectory;
+    row.setAttribute("draggable", "true");
+    row.onclick = (e) => handleClick(e, index);
+    row.oncontextmenu = (e) => showContext(e, index);
+    row.ondragstart = (e) => handleDragStart(e, index);
+    row.ondragend = (e) => handleDragEnd(e);
+    if (item.isDirectory) {
+      row.ondragover = (e) => handleDragOver(e);
+      row.ondragleave = (e) => handleDragLeave(e);
+      row.ondrop = (e) => handleFileDrop(e, index);
+    }
+
+    const iconDiv = document.createElement("div");
+    iconDiv.className = "compact-icon";
+    // getFileIcon returns internal SVG markup
+    const cIconTpl = document.createElement("template");
+    cIconTpl.innerHTML = getFileIcon(item.name, item.isDirectory);
+    iconDiv.appendChild(cIconTpl.content);
+
+    const nameDiv = document.createElement("div");
+    nameDiv.className = "compact-name";
+    nameDiv.textContent = item.name;
+
+    const sizeDiv = document.createElement("div");
+    sizeDiv.className = "compact-size";
+    sizeDiv.textContent = item.isDirectory ? "" : formatSize(item.size);
+
+    row.appendChild(iconDiv);
+    row.appendChild(nameDiv);
+    row.appendChild(sizeDiv);
+    grid.appendChild(row);
+  });
+}
+
+// Extend renderCurrentView and setViewMode for compact
+const _originalRenderCurrentView = renderCurrentView;
+renderCurrentView = function(items) {
+  if (viewMode === "compact") {
+    renderCompactView(items);
+  } else {
+    _originalRenderCurrentView(items);
+  }
+};
+
+const _originalSetViewMode = setViewMode;
+setViewMode = function(mode) {
+  viewMode = mode;
+  localStorage.setItem("viewMode", mode);
+  const gridBtn = document.getElementById("viewGridBtn");
+  const detailsBtn = document.getElementById("viewDetailsBtn");
+  const compactBtn = document.getElementById("viewCompactBtn");
+  if (gridBtn) gridBtn.classList.toggle("active", mode === "grid");
+  if (detailsBtn) detailsBtn.classList.toggle("active", mode === "details");
+  if (compactBtn) compactBtn.classList.toggle("active", mode === "compact");
+  renderCurrentView(filteredItems);
+  saveFolderState();
+};
+
+// --- Pinch-to-Zoom in Preview ---
+let pinchScale = 1;
+let pinchStartDist = 0;
+let pinchPanning = false;
+let pinchPanX = 0, pinchPanY = 0;
+let pinchLastTap = 0;
+
+function initPinchZoom() {
+  const overlay = document.getElementById("mediaOverlay");
+  if (!overlay) return;
+
+  overlay.addEventListener("touchstart", (e) => {
+    const img = overlay.querySelector("#mediaContainer img");
+    if (!img) return;
+
+    if (e.touches.length === 2) {
+      pinchStartDist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+    } else if (e.touches.length === 1 && pinchScale > 1) {
+      pinchPanning = true;
+      pinchPanX = e.touches[0].clientX;
+      pinchPanY = e.touches[0].clientY;
+    }
+
+    // Double-tap detection
+    if (e.touches.length === 1) {
+      const now = Date.now();
+      if (now - pinchLastTap < 300) {
+        pinchScale = pinchScale > 1 ? 1 : 2;
+        img.style.transform = `scale(${pinchScale})`;
+        if (pinchScale === 1) img.style.transformOrigin = "center center";
+      }
+      pinchLastTap = now;
+    }
+  }, { passive: true });
+
+  overlay.addEventListener("touchmove", (e) => {
+    const img = overlay.querySelector("#mediaContainer img");
+    if (!img) return;
+
+    if (e.touches.length === 2) {
+      const dist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+      pinchScale = Math.max(1, Math.min(5, pinchScale * (dist / pinchStartDist)));
+      pinchStartDist = dist;
+      img.style.transform = `scale(${pinchScale})`;
+    } else if (pinchPanning && pinchScale > 1 && e.touches.length === 1) {
+      const dx = e.touches[0].clientX - pinchPanX;
+      const dy = e.touches[0].clientY - pinchPanY;
+      const current = img.style.transformOrigin || "center center";
+      const parts = current.split(" ").map(v => parseFloat(v) || 50);
+      img.style.transformOrigin = `${parts[0] - dx * 0.5}% ${parts[1] - dy * 0.5}%`;
+      pinchPanX = e.touches[0].clientX;
+      pinchPanY = e.touches[0].clientY;
+    }
+  }, { passive: true });
+
+  overlay.addEventListener("touchend", () => {
+    pinchPanning = false;
+  }, { passive: true });
+}
+
+function resetPinchZoom() {
+  pinchScale = 1;
+  const overlay = document.getElementById("mediaOverlay");
+  if (overlay) {
+    const img = overlay.querySelector("#mediaContainer img");
+    if (img) {
+      img.style.transform = "";
+      img.style.transformOrigin = "";
+    }
+  }
+}
+
+// --- Initialize all mobile features ---
+function initMobileFeatures() {
+  initTouchHandlers();
+  initPullToRefresh();
+  initEdgeSwipe();
+  initPinchZoom();
+
+  // Re-init on window resize
+  window.addEventListener("resize", () => {
+    const fab = document.getElementById("fab");
+    if (fab) {
+      fab.style.display = isMobile() && selectedPaths.size === 0 ? "flex" : "none";
+    }
+  });
+}
+
+// Hook into initApp
+const _originalInitApp = initApp;
+initApp = async function() {
+  await _originalInitApp();
+  initMobileFeatures();
+};
 
 // Startup: check setup status, then auth
 (async function startup() {
