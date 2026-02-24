@@ -2798,6 +2798,7 @@ function setSort(field) {
   });
 
   applyFilterAndSort();
+  saveFolderState();
 }
 
 function applyFilterAndSort() {
@@ -3717,6 +3718,8 @@ function copyToClip(btn, text) {
 }
 
 async function navigate(path, { pushHistory = true, navPush = true } = {}) {
+  // Save current folder state before navigating away
+  if (currentPath) saveFolderState();
   currentPath = path || defaultDir;
 
   // Push browser history state so back/forward buttons navigate folders
@@ -3755,6 +3758,7 @@ async function navigate(path, { pushHistory = true, navPush = true } = {}) {
       return;
     }
     currentItems = await res.json();
+    restoreFolderState(currentPath);
     applyFilterAndSort();
     renderFavorites();
     updatePinButton();
@@ -4011,6 +4015,7 @@ function setViewMode(mode) {
   document.getElementById("viewGridBtn").classList.toggle("active", mode === "grid");
   document.getElementById("viewDetailsBtn").classList.toggle("active", mode === "details");
   renderCurrentView(filteredItems);
+  saveFolderState();
 }
 
 function getFileType(name, isDir) {
@@ -4192,6 +4197,7 @@ async function confirmNewFile() {
       body: JSON.stringify({ path: currentPath, name }),
     });
     if (res.ok) {
+      pushAction({ type: "create", path: currentPath + "/" + name, name, isDir: false });
       toast("Created file: " + name, "success");
       closeModal("newFileModal");
       navigate(currentPath);
@@ -4225,27 +4231,27 @@ async function pasteItems() {
   if (!clipboard.paths || clipboard.paths.length === 0) return;
   let successCount = 0;
   let failCount = 0;
+  const actionEntries = [];
 
   for (const srcPath of clipboard.paths) {
     const fileName = srcPath.split("/").pop();
     const destPath = currentPath + "/" + fileName;
     try {
       const endpoint = clipboard.isCut ? "/api/move" : "/api/copy";
-      const body = clipboard.isCut
-        ? { sourcePath: srcPath, destPath }
-        : { sourcePath: srcPath, destPath };
       const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ sourcePath: srcPath, destPath }),
       });
-      if (res.ok) successCount++;
+      if (res.ok) { successCount++; actionEntries.push({ source: srcPath, dest: destPath }); }
       else failCount++;
     } catch { failCount++; }
   }
 
   if (successCount > 0) {
-    toast((clipboard.isCut ? "Moved " : "Copied ") + successCount + " item(s)", "success");
+    const isCut = clipboard.isCut;
+    pushAction({ type: isCut ? "move" : "copy", [isCut ? "moves" : "copies"]: actionEntries });
+    toast((isCut ? "Moved " : "Copied ") + successCount + " item(s)", "success");
   }
   if (failCount > 0) {
     toast("Failed: " + failCount + " item(s)", "error");
@@ -4335,6 +4341,7 @@ function startInlineRename(index) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ oldPath: item.path, newName }),
         });
+        pushAction({ type: "rename", path: item.path, oldName, newName });
         toast("Renamed to " + newName, "success");
         navigate(currentPath);
       } catch { toast("Rename failed", "error"); }
@@ -4414,6 +4421,7 @@ async function handleFileDrop(event, targetIndex) {
   const endpoint = isCopy ? "/api/copy" : "/api/move";
   const verb = isCopy ? "Copied" : "Moved";
   let ok = 0, fail = 0;
+  const actionMoves = [];
 
   for (const item of draggedItems) {
     // Don't drop a folder into itself
@@ -4425,11 +4433,15 @@ async function handleFileDrop(event, targetIndex) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sourcePath: item.path, destPath })
       });
-      if (res.ok) ok++; else fail++;
+      if (res.ok) { ok++; actionMoves.push({ source: item.path, dest: destPath }); }
+      else fail++;
     } catch { fail++; }
   }
 
-  if (ok > 0) toast(verb + " " + ok + " item(s) to " + targetItem.name, "success");
+  if (ok > 0) {
+    pushAction({ type: isCopy ? "copy" : "move", [isCopy ? "copies" : "moves"]: actionMoves });
+    toast(verb + " " + ok + " item(s) to " + targetItem.name, "success");
+  }
   if (fail > 0) toast("Failed: " + fail + " item(s)", "error");
   draggedItems = [];
   navigate(currentPath);
@@ -4732,6 +4744,7 @@ async function confirmRename() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ oldPath: contextTarget.path, newName }),
     });
+    pushAction({ type: "rename", path: contextTarget.path, oldName: contextTarget.name, newName });
     toast("Renamed to " + newName, "success");
     closeModal("renameModal");
     navigate(currentPath);
@@ -4838,6 +4851,7 @@ async function confirmFolder() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ path: currentPath, name }),
     });
+    pushAction({ type: "create", path: currentPath + "/" + name, name, isDir: true });
     toast("Created folder: " + name, "success");
     closeModal("folderModal");
     navigate(currentPath);
@@ -4922,6 +4936,198 @@ document.addEventListener("drop", e => {
     if (files.length) uploadFiles(files);
   }
 });
+
+// ==================== UNDO/REDO ====================
+let actionHistory = [];
+let actionHistoryIndex = -1;
+const MAX_ACTION_HISTORY = 50;
+
+function pushAction(action) {
+  // Truncate forward history
+  actionHistory = actionHistory.slice(0, actionHistoryIndex + 1);
+  actionHistory.push(action);
+  if (actionHistory.length > MAX_ACTION_HISTORY) actionHistory.shift();
+  actionHistoryIndex = actionHistory.length - 1;
+}
+
+async function undoAction() {
+  if (actionHistoryIndex < 0) { toast("Nothing to undo", "info"); return; }
+  const action = actionHistory[actionHistoryIndex];
+  actionHistoryIndex--;
+  try {
+    switch (action.type) {
+      case "rename": {
+        // Undo rename: rename back
+        const dir = action.path.substring(0, action.path.lastIndexOf("/"));
+        const undoPath = dir + "/" + action.newName;
+        await fetch("/api/rename", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ oldPath: undoPath, newName: action.oldName }),
+        });
+        toast("Undo: renamed back to " + action.oldName, "success");
+        navigate(currentPath);
+        break;
+      }
+      case "move": {
+        // Undo move: move back
+        for (const m of action.moves) {
+          await fetch("/api/move", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sourcePath: m.dest, destPath: m.source }),
+          });
+        }
+        toast("Undo: moved " + action.moves.length + " item(s) back", "success");
+        navigate(currentPath);
+        break;
+      }
+      case "copy": {
+        // Undo copy: delete the copies
+        for (const c of action.copies) {
+          await fetch("/api/delete", {
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ path: c.dest }),
+          });
+        }
+        toast("Undo: removed " + action.copies.length + " copied item(s)", "success");
+        navigate(currentPath);
+        break;
+      }
+      case "create": {
+        // Undo create: delete
+        await fetch("/api/delete", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ path: action.path }),
+        });
+        toast("Undo: deleted " + action.name, "success");
+        navigate(currentPath);
+        break;
+      }
+      default:
+        toast("Cannot undo this action", "info");
+    }
+  } catch {
+    toast("Undo failed", "error");
+  }
+}
+
+async function redoAction() {
+  if (actionHistoryIndex >= actionHistory.length - 1) { toast("Nothing to redo", "info"); return; }
+  actionHistoryIndex++;
+  const action = actionHistory[actionHistoryIndex];
+  try {
+    switch (action.type) {
+      case "rename": {
+        await fetch("/api/rename", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ oldPath: action.path, newName: action.newName }),
+        });
+        toast("Redo: renamed to " + action.newName, "success");
+        navigate(currentPath);
+        break;
+      }
+      case "move": {
+        for (const m of action.moves) {
+          await fetch("/api/move", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sourcePath: m.source, destPath: m.dest }),
+          });
+        }
+        toast("Redo: moved " + action.moves.length + " item(s)", "success");
+        navigate(currentPath);
+        break;
+      }
+      case "copy": {
+        for (const c of action.copies) {
+          await fetch("/api/copy", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sourcePath: c.source, destPath: c.dest }),
+          });
+        }
+        toast("Redo: copied " + action.copies.length + " item(s)", "success");
+        navigate(currentPath);
+        break;
+      }
+      case "create": {
+        const endpoint = action.isDir ? "/api/mkdir" : "/api/touch";
+        await fetch(endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ path: action.path }),
+        });
+        toast("Redo: created " + action.name, "success");
+        navigate(currentPath);
+        break;
+      }
+      default:
+        toast("Cannot redo this action", "info");
+    }
+  } catch {
+    toast("Redo failed", "error");
+  }
+}
+
+// ==================== PER-FOLDER MEMORY ====================
+const FOLDER_MEMORY_KEY = "folderMemory";
+const MAX_FOLDER_MEMORY = 100;
+
+function loadFolderMemory() {
+  return JSON.parse(localStorage.getItem(FOLDER_MEMORY_KEY) || "{}");
+}
+
+function saveFolderMemory(memory) {
+  // LRU eviction
+  const keys = Object.keys(memory);
+  if (keys.length > MAX_FOLDER_MEMORY) {
+    // Sort by timestamp, remove oldest
+    keys.sort((a, b) => (memory[a].ts || 0) - (memory[b].ts || 0));
+    while (keys.length > MAX_FOLDER_MEMORY) {
+      delete memory[keys.shift()];
+    }
+  }
+  localStorage.setItem(FOLDER_MEMORY_KEY, JSON.stringify(memory));
+}
+
+function saveFolderState() {
+  const memory = loadFolderMemory();
+  memory[currentPath] = {
+    viewMode: viewMode,
+    sort: { field: currentSort.field, asc: currentSort.asc },
+    colWidths: detailsColWidths,
+    ts: Date.now(),
+  };
+  saveFolderMemory(memory);
+}
+
+function restoreFolderState(path) {
+  const memory = loadFolderMemory();
+  const state = memory[path];
+  if (!state) return false;
+  // Update timestamp for LRU
+  state.ts = Date.now();
+  saveFolderMemory(memory);
+
+  if (state.viewMode && state.viewMode !== viewMode) {
+    setViewMode(state.viewMode);
+  }
+  if (state.sort) {
+    currentSort.field = state.sort.field;
+    currentSort.asc = state.sort.asc;
+    document.querySelectorAll(".sort-btn:not(.hidden-toggle)").forEach(btn => {
+      btn.classList.toggle("active", btn.dataset.sort === currentSort.field);
+    });
+  }
+  if (state.colWidths) {
+    detailsColWidths = state.colWidths;
+  }
+  return true;
+}
 
 // ==================== RUBBER BAND SELECTION ====================
 let rubberBand = null;
@@ -5429,6 +5635,19 @@ document.addEventListener("keydown", e => {
   if ((e.ctrlKey || e.metaKey) && e.key === "v" && clipboard.paths.length > 0) {
     e.preventDefault();
     pasteItems();
+    return;
+  }
+
+  // Ctrl+Z: Undo
+  if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) {
+    e.preventDefault();
+    undoAction();
+    return;
+  }
+  // Ctrl+Y or Ctrl+Shift+Z: Redo
+  if ((e.ctrlKey || e.metaKey) && (e.key === "y" || (e.key === "z" && e.shiftKey) || (e.key === "Z" && e.shiftKey))) {
+    e.preventDefault();
+    redoAction();
     return;
   }
 
