@@ -1806,6 +1806,34 @@
     .preview-pane { display: none; }
   }
 
+  /* Rubber band selection */
+  .rubber-band {
+    position: fixed;
+    border: 1px solid var(--accent);
+    background: rgba(59,130,246,0.12);
+    pointer-events: none;
+    z-index: 100;
+  }
+
+  /* Column resize handle */
+  .col-resize-handle {
+    position: absolute;
+    right: -3px;
+    top: 0;
+    width: 6px;
+    height: 100%;
+    cursor: col-resize;
+    z-index: 5;
+  }
+  .col-resize-handle:hover,
+  .col-resize-handle.active {
+    background: var(--accent);
+    opacity: 0.5;
+  }
+  .details-header .col-header {
+    position: relative;
+  }
+
   /* View toggle button */
   .view-toggle {
     display: flex;
@@ -3971,6 +3999,7 @@ function renderGrid(items) {
 function renderCurrentView(items) {
   if (viewMode === "details") {
     renderDetailsView(items);
+    initColumnResize();
   } else {
     renderGrid(items);
   }
@@ -4893,6 +4922,164 @@ document.addEventListener("drop", e => {
     if (files.length) uploadFiles(files);
   }
 });
+
+// ==================== RUBBER BAND SELECTION ====================
+let rubberBand = null;
+let rubberStart = null;
+let rubberActive = false;
+
+function initRubberBand() {
+  const grid = document.getElementById("fileGrid");
+
+  grid.addEventListener("mousedown", (e) => {
+    // Only start rubber band if clicking on empty space (not on items)
+    if (e.button !== 0) return;
+    const target = e.target.closest(".file-item, .details-row, .details-header, .checkbox");
+    if (target) return;
+    // Must be on the grid or details-view background
+    if (e.target !== grid && !e.target.classList.contains("details-view") && e.target.id !== "fileGrid") return;
+
+    rubberStart = { x: e.clientX, y: e.clientY };
+    rubberActive = false;
+
+    // If not Ctrl-held, clear selection first (we'll do this on move start)
+    if (!e.ctrlKey && !e.metaKey) {
+      clearSelection();
+    }
+
+    const onMouseMove = (ev) => {
+      if (!rubberStart) return;
+      const dx = ev.clientX - rubberStart.x;
+      const dy = ev.clientY - rubberStart.y;
+      if (!rubberActive && Math.abs(dx) < 5 && Math.abs(dy) < 5) return;
+
+      if (!rubberActive) {
+        rubberActive = true;
+        rubberBand = document.createElement("div");
+        rubberBand.className = "rubber-band";
+        document.body.appendChild(rubberBand);
+      }
+
+      const left = Math.min(rubberStart.x, ev.clientX);
+      const top = Math.min(rubberStart.y, ev.clientY);
+      const width = Math.abs(dx);
+      const height = Math.abs(dy);
+      rubberBand.style.left = left + "px";
+      rubberBand.style.top = top + "px";
+      rubberBand.style.width = width + "px";
+      rubberBand.style.height = height + "px";
+
+      // Check which items intersect
+      const rect = { left, top, right: left + width, bottom: top + height };
+      const sel = viewMode === "details" ? ".details-row" : ".file-item";
+      document.querySelectorAll(sel).forEach(el => {
+        const idx = parseInt(el.dataset.index);
+        if (isNaN(idx)) return;
+        const elRect = el.getBoundingClientRect();
+        const intersects = !(elRect.right < rect.left || elRect.left > rect.right || elRect.bottom < rect.top || elRect.top > rect.bottom);
+        const item = filteredItems[idx];
+        if (!item) return;
+        if (intersects) {
+          if (!selectedPaths.has(item.path)) {
+            selectedPaths.add(item.path);
+            el.classList.add("selected");
+          }
+        } else if (!e.ctrlKey && !e.metaKey) {
+          if (selectedPaths.has(item.path)) {
+            selectedPaths.delete(item.path);
+            el.classList.remove("selected");
+          }
+        }
+      });
+      updateSelectionUI();
+    };
+
+    const onMouseUp = () => {
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+      if (rubberBand) {
+        rubberBand.remove();
+        rubberBand = null;
+      }
+      rubberStart = null;
+      rubberActive = false;
+    };
+
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
+  });
+}
+
+// Initialize rubber band after DOM ready
+initRubberBand();
+
+// ==================== COLUMN RESIZE ====================
+let detailsColWidths = JSON.parse(localStorage.getItem("detailsColWidths") || "null");
+
+function getDefaultColWidths() {
+  return [null, 180, 100, 100]; // Name is flex, rest fixed
+}
+
+function applyColumnWidths() {
+  if (!detailsColWidths) return;
+  const tpl = "minmax(200px, 1fr) " + detailsColWidths.slice(1).map(w => w + "px").join(" ");
+  const header = document.getElementById("detailsHeader");
+  if (header) header.style.gridTemplateColumns = tpl;
+  document.querySelectorAll(".details-row").forEach(row => {
+    row.style.gridTemplateColumns = tpl;
+  });
+}
+
+function initColumnResize() {
+  // Called after renderDetailsView to add resize handles
+  const header = document.getElementById("detailsHeader");
+  if (!header) return;
+
+  const cols = header.querySelectorAll(".col-header");
+  // Add resize handles to columns except the last one
+  cols.forEach((col, i) => {
+    if (i === cols.length - 1) return;
+    const handle = document.createElement("div");
+    handle.className = "col-resize-handle";
+    handle.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!detailsColWidths) detailsColWidths = getDefaultColWidths();
+
+      handle.classList.add("active");
+      const startX = e.clientX;
+      const colRect = col.getBoundingClientRect();
+      const startWidth = colRect.width;
+      const nextCol = cols[i + 1];
+      const nextRect = nextCol ? nextCol.getBoundingClientRect() : null;
+      const nextStartWidth = nextRect ? nextRect.width : 0;
+
+      const onMove = (ev) => {
+        const diff = ev.clientX - startX;
+        const newWidth = Math.max(60, startWidth + diff);
+        if (i === 0) {
+          // Name column (flex, so we don't resize it directly, resize the next)
+          const nextNew = Math.max(60, nextStartWidth - diff);
+          detailsColWidths[i + 1] = Math.round(nextNew);
+        } else {
+          detailsColWidths[i] = Math.round(newWidth);
+        }
+        applyColumnWidths();
+      };
+      const onUp = () => {
+        handle.classList.remove("active");
+        document.removeEventListener("mousemove", onMove);
+        document.removeEventListener("mouseup", onUp);
+        localStorage.setItem("detailsColWidths", JSON.stringify(detailsColWidths));
+      };
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp);
+    });
+    col.appendChild(handle);
+  });
+
+  if (detailsColWidths) applyColumnWidths();
+}
 
 // ==================== FAVORITES ====================
 let favorites = JSON.parse(localStorage.getItem("favorites") || "[]");
