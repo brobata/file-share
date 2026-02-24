@@ -45,7 +45,7 @@
   }
 
   /* Smooth transitions for theme */
-  body, .header, .system-bar, .breadcrumb, .path-bar, .toolbar,
+  body, .header, .system-bar, .nav-bar, .path-bar, .toolbar,
   .file-grid, .file-item, .modal, .context-menu, .toast {
     transition: background-color 0.3s ease, border-color 0.3s ease, color 0.3s ease;
   }
@@ -613,25 +613,7 @@
     margin-left: auto;
   }
 
-  /* Breadcrumb */
-  .breadcrumb {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    padding: 12px 24px;
-    font-size: 13px;
-    color: var(--text-muted);
-    border-bottom: 1px solid var(--border);
-    background: var(--surface);
-    flex-wrap: wrap;
-  }
-  .breadcrumb a {
-    color: var(--accent);
-    text-decoration: none;
-    cursor: pointer;
-  }
-  .breadcrumb a:hover { text-decoration: underline; }
-  .breadcrumb .sep { margin: 0 2px; color: var(--border); }
+  /* Breadcrumb (now inside nav-bar) */
 
   /* Path bar */
   .path-bar {
@@ -1430,7 +1412,6 @@
     .sys-item .sys-value { font-size: 11px; }
     .system-bar .sys-divider:nth-child(8),
     .system-bar .sys-item:nth-child(9) { display: none; }
-    .breadcrumb { padding: 10px 16px; }
     .path-bar { padding: 8px 16px; gap: 8px; }
     .path-bar .path-label { display: none; }
     .path-bar .path-value { font-size: 11px; padding: 6px 10px; }
@@ -1453,6 +1434,117 @@
     .selection-bar .left-actions { gap: 6px; }
     .selection-bar .actions { gap: 6px; }
     .selection-bar .divider { display: none; }
+  }
+
+  /* Navigation bar */
+  .nav-bar {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 24px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
+  .nav-btn {
+    width: 32px;
+    height: 32px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface2);
+    color: var(--text-muted);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s;
+    flex-shrink: 0;
+  }
+  .nav-btn:hover:not(:disabled) { background: var(--border); color: var(--text); }
+  .nav-btn:disabled { opacity: 0.3; cursor: default; }
+  .nav-btn svg { width: 16px; height: 16px; }
+  .breadcrumb-wrapper {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    margin-left: 4px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0 12px;
+    height: 32px;
+    cursor: text;
+    transition: border-color 0.15s;
+    overflow: hidden;
+  }
+  .breadcrumb-wrapper:hover { border-color: var(--text-muted); }
+  .breadcrumb-wrapper.editing { border-color: var(--accent); }
+  .breadcrumb-inner {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 13px;
+    color: var(--text-muted);
+    overflow: hidden;
+    white-space: nowrap;
+    flex: 1;
+    min-width: 0;
+  }
+  .breadcrumb-inner a {
+    color: var(--text);
+    text-decoration: none;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .breadcrumb-inner a:hover { color: var(--accent); }
+  .breadcrumb-inner .sep { margin: 0 1px; color: var(--border); font-size: 11px; }
+  .breadcrumb-edit-input {
+    width: 100%;
+    border: none;
+    background: transparent;
+    color: var(--text);
+    font-family: 'SF Mono', 'Consolas', monospace;
+    font-size: 13px;
+    outline: none;
+    padding: 0;
+  }
+
+  /* Status bar (bottom) */
+  .status-bar {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 6px 24px;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--text-muted);
+    min-height: 28px;
+    margin-top: auto;
+    flex-shrink: 0;
+  }
+  .status-bar .status-section {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+  }
+  .status-bar .status-divider {
+    width: 1px;
+    height: 14px;
+    background: var(--border);
+  }
+
+  @media (max-width: 640px) {
+    .nav-bar { padding: 6px 16px; gap: 2px; }
+    .breadcrumb-wrapper { height: 30px; padding: 0 8px; }
+    .status-bar { padding: 4px 16px; font-size: 11px; gap: 10px; }
+  }
+  @media (max-width: 480px) {
+    .nav-bar { padding: 4px 8px; gap: 2px; }
+    .nav-btn { width: 28px; height: 28px; }
+    .breadcrumb-wrapper { height: 28px; font-size: 12px; }
+    .status-bar { padding: 4px 12px; gap: 8px; font-size: 10px; }
   }
 
   /* Mobile-specific (phones) */
@@ -1588,11 +1680,7 @@
       width: calc(100vw - 32px) !important;
     }
 
-    /* 8. Breadcrumbs + path bar compact */
-    .breadcrumb {
-      font-size: 12px;
-      padding: 8px 12px;
-    }
+    /* 8. Path bar compact */
     .path-bar {
       display: none;
     }
@@ -1658,23 +1746,17 @@
     <h2>Welcome to File Explorer</h2>
     <p>Set up your file sharing server</p>
     <div class="auth-error" id="setupError">Setup failed</div>
-    <input type="password" id="setupPassword" placeholder="Choose a password" style="margin-bottom: 12px;" onkeydown="if(event.key==='Enter')document.getElementById('setupConfirmPassword').focus()">
-    <input type="password" id="setupConfirmPassword" placeholder="Confirm password" style="margin-bottom: 12px;" onkeydown="if(event.key==='Enter')document.getElementById('setupDir').focus()">
-    <input type="text" id="setupDir" placeholder="Shared directory (e.g. ~/shared)" style="width:100%;padding:12px 16px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:14px;margin-bottom:12px;text-align:center;" onkeydown="if(event.key==='Enter')submitSetup()">
-    <label style="display:flex;align-items:center;gap:8px;justify-content:center;font-size:13px;color:var(--text-muted);margin-bottom:12px;cursor:pointer;">
-      <input type="checkbox" id="setupFilesystem" style="width:16px;height:16px;accent-color:var(--accent);">
-      Allow full filesystem browsing
-    </label>
-    <div style="margin-bottom:16px;">
-      <label style="display:block;font-size:12px;color:var(--text-muted);margin-bottom:6px;">Session expiration</label>
-      <select id="setupTokenExpiry" style="width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:14px;text-align:center;appearance:auto;">
-        <option value="0">Never (recommended for private networks)</option>
-        <option value="86400000">1 day</option>
-        <option value="604800000">7 days</option>
-        <option value="2592000000">30 days</option>
-      </select>
-    </div>
-    <button onclick="submitSetup()">Complete Setup</button>
+    <form onsubmit="event.preventDefault();submitSetup();" autocomplete="on">
+      <input type="text" id="setupUsername" name="username" autocomplete="username" placeholder="Username (default: admin)" value="admin" style="width:100%;padding:12px 16px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:14px;margin-bottom:12px;text-align:center;">
+      <input type="password" id="setupPassword" name="password" autocomplete="new-password" placeholder="Choose a password" style="width:100%;padding:12px 16px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:14px;margin-bottom:12px;text-align:center;">
+      <input type="password" id="setupConfirmPassword" name="confirm-password" autocomplete="new-password" placeholder="Confirm password" style="width:100%;padding:12px 16px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:14px;margin-bottom:12px;text-align:center;">
+      <input type="text" id="setupDir" placeholder="Shared directory (e.g. ~/shared)" style="width:100%;padding:12px 16px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:14px;margin-bottom:12px;text-align:center;">
+      <label style="display:flex;align-items:center;gap:8px;justify-content:center;font-size:13px;color:var(--text-muted);margin-bottom:16px;cursor:pointer;">
+        <input type="checkbox" id="setupFilesystem" style="width:16px;height:16px;accent-color:var(--accent);">
+        Allow full filesystem browsing
+      </label>
+      <button type="submit">Complete Setup</button>
+    </form>
   </div>
 </div>
 
@@ -1683,10 +1765,17 @@
   <div class="auth-box">
     <div class="auth-icon">&#128274;</div>
     <h2>File Explorer</h2>
-    <p>Enter password to access files</p>
-    <div class="auth-error" id="authError">Incorrect password</div>
-    <input type="password" id="authPassword" placeholder="Password" onkeydown="if(event.key==='Enter')submitAuth()">
-    <button onclick="submitAuth()">Unlock</button>
+    <p>Sign in to access files</p>
+    <div class="auth-error" id="authError">Incorrect credentials</div>
+    <form onsubmit="event.preventDefault();submitAuth();" autocomplete="on">
+      <input type="text" id="authUsername" name="username" autocomplete="username" placeholder="Username" style="width:100%;padding:12px 16px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:14px;margin-bottom:12px;text-align:center;">
+      <input type="password" id="authPassword" name="password" autocomplete="current-password" placeholder="Password" style="width:100%;padding:12px 16px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:14px;margin-bottom:12px;text-align:center;">
+      <label style="display:flex;align-items:center;gap:8px;justify-content:center;font-size:13px;color:var(--text-muted);margin-bottom:16px;cursor:pointer;">
+        <input type="checkbox" id="authRemember" checked style="width:16px;height:16px;accent-color:var(--accent);">
+        Remember me for 30 days
+      </label>
+      <button type="submit">Sign In</button>
+    </form>
   </div>
 </div>
 
@@ -1710,13 +1799,8 @@
     </div>
 
     <div style="margin-bottom:16px;">
-      <label style="display:block;font-size:13px;color:var(--text-muted);margin-bottom:6px;">Session Expiration</label>
-      <select id="settingsTokenExpiry" style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:14px;appearance:auto;">
-        <option value="0">Never</option>
-        <option value="86400000">1 day</option>
-        <option value="604800000">7 days</option>
-        <option value="2592000000">30 days</option>
-      </select>
+      <label style="display:block;font-size:13px;color:var(--text-muted);margin-bottom:6px;">Username</label>
+      <input type="text" id="settingsUsername" autocomplete="username" placeholder="admin" style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:14px;">
     </div>
 
     <hr style="border:none;border-top:1px solid var(--border);margin:16px 0;">
@@ -1868,7 +1952,25 @@
   </div>
 </div>
 
-<div class="breadcrumb" id="breadcrumb"></div>
+<div class="nav-bar" id="navBar">
+  <button class="nav-btn" id="navBack" onclick="navigateBack()" title="Back (Alt+Left)" disabled>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+  </button>
+  <button class="nav-btn" id="navForward" onclick="navigateForward()" title="Forward (Alt+Right)" disabled>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+  </button>
+  <button class="nav-btn" id="navUp" onclick="navigateUp()" title="Up (Alt+Up)" disabled>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"/></svg>
+  </button>
+  <div class="breadcrumb-wrapper" id="breadcrumbWrapper" onclick="startBreadcrumbEdit(event)">
+    <div class="breadcrumb-inner" id="breadcrumb"></div>
+    <input class="breadcrumb-edit-input" id="breadcrumbEditInput" style="display:none"
+           onkeydown="handleBreadcrumbEditKey(event)" onblur="cancelBreadcrumbEdit()">
+  </div>
+  <button class="nav-btn" onclick="navigate(currentPath)" title="Refresh (F5)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+  </button>
+</div>
 
 <div class="path-bar">
   <span class="path-label">Full Path</span>
@@ -2035,6 +2137,13 @@
   <div class="media-counter" id="mediaCounter"></div>
 </div>
 
+<div class="status-bar" id="statusBar">
+  <span class="status-section" id="statusItemCount">0 items</span>
+  <span class="status-divider" id="statusSelDivider" style="display:none"></span>
+  <span class="status-section" id="statusSelection"></span>
+  <span class="status-section" id="statusDisk" style="margin-left:auto"></span>
+</div>
+
   </div><!-- end main-content -->
 </div><!-- end app-layout -->
 
@@ -2049,13 +2158,14 @@ let currentItems = [];
 let filteredItems = [];
 let selectedPaths = new Set();
 let lastSelectedIndex = -1;
-let authToken = localStorage.getItem("authToken") || "";
 let currentSort = { field: "name", asc: true };
 let searchQuery = "";
 let drives = [];
 let expandedPaths = new Set();
 let sidebarCollapsed = localStorage.getItem("sidebarCollapsed") === "true";
 let showHiddenFiles = localStorage.getItem("showHiddenFiles") === "true";
+let navHistory = [];
+let navHistoryIndex = -1;
 
 // Setup functions
 async function checkSetupNeeded() {
@@ -2069,11 +2179,11 @@ async function checkSetupNeeded() {
 }
 
 async function submitSetup() {
+  const username = document.getElementById("setupUsername").value.trim();
   const password = document.getElementById("setupPassword").value;
   const confirmPassword = document.getElementById("setupConfirmPassword").value;
   const sharedDir = document.getElementById("setupDir").value.trim();
   const allowFullFilesystem = document.getElementById("setupFilesystem").checked;
-  const tokenExpiryMs = parseInt(document.getElementById("setupTokenExpiry").value, 10) || 0;
   const errorEl = document.getElementById("setupError");
 
   if (!password) {
@@ -2089,9 +2199,8 @@ async function submitSetup() {
   }
 
   try {
-    const body = { password, tokenExpiryMs };
+    const body = { username: username || "admin", password, allowFullFilesystem };
     if (sharedDir) body.sharedDir = sharedDir;
-    body.allowFullFilesystem = allowFullFilesystem;
 
     const res = await fetch("/api/setup", {
       method: "POST",
@@ -2100,9 +2209,6 @@ async function submitSetup() {
     });
 
     if (res.ok) {
-      const data = await res.json();
-      authToken = data.token;
-      localStorage.setItem("authToken", authToken);
       document.getElementById("setupOverlay").classList.add("hidden");
       initApp();
     } else {
@@ -2118,25 +2224,24 @@ async function submitSetup() {
 
 // Auth functions
 async function submitAuth() {
+  const username = document.getElementById("authUsername").value;
   const password = document.getElementById("authPassword").value;
+  const rememberMe = document.getElementById("authRemember").checked;
   const errorEl = document.getElementById("authError");
 
   try {
     const res = await fetch("/api/auth", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ password })
+      body: JSON.stringify({ username, password, rememberMe })
     });
 
     if (res.ok) {
-      const data = await res.json();
-      authToken = data.token;
-      localStorage.setItem("authToken", authToken);
       document.getElementById("authOverlay").classList.add("hidden");
       initApp();
     } else {
       const err = await res.json().catch(() => null);
-      errorEl.textContent = (err && err.error) || "Incorrect password";
+      errorEl.textContent = (err && err.error) || "Invalid credentials";
       errorEl.classList.add("visible");
       document.getElementById("authPassword").value = "";
       document.getElementById("authPassword").focus();
@@ -2145,10 +2250,6 @@ async function submitAuth() {
     errorEl.textContent = "Connection error";
     errorEl.classList.add("visible");
   }
-}
-
-function authHeaders() {
-  return { "X-Auth-Token": authToken };
 }
 
 // Settings functions
@@ -2162,12 +2263,12 @@ async function openSettings() {
   document.getElementById("settingsConfirmPassword").value = "";
 
   try {
-    const res = await fetch("/api/settings", { headers: authHeaders() });
+    const res = await fetch("/api/settings");
     if (res.ok) {
       const data = await res.json();
+      document.getElementById("settingsUsername").value = data.username || "admin";
       document.getElementById("settingsDir").value = data.sharedDir || "";
       document.getElementById("settingsFilesystem").checked = !!data.allowFullFilesystem;
-      document.getElementById("settingsTokenExpiry").value = String(data.tokenExpiryMs || 0);
     }
   } catch {}
 
@@ -2205,9 +2306,9 @@ async function saveSettings() {
 
   const body = {
     currentPassword,
+    newUsername: document.getElementById("settingsUsername").value.trim(),
     sharedDir: document.getElementById("settingsDir").value.trim(),
     allowFullFilesystem: document.getElementById("settingsFilesystem").checked,
-    tokenExpiryMs: parseInt(document.getElementById("settingsTokenExpiry").value, 10) || 0,
   };
 
   if (newPassword) body.newPassword = newPassword;
@@ -2215,16 +2316,11 @@ async function saveSettings() {
   try {
     const res = await fetch("/api/settings", {
       method: "POST",
-      headers: { "Content-Type": "application/json", ...authHeaders() },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
 
     if (res.ok) {
-      const data = await res.json();
-      if (data.token) {
-        authToken = data.token;
-        localStorage.setItem("authToken", authToken);
-      }
       successEl.style.display = "block";
       toast("Settings saved", "success");
       document.getElementById("settingsCurrentPassword").value = "";
@@ -2242,20 +2338,23 @@ async function saveSettings() {
   }
 }
 
-function checkAuth() {
-  if (authToken) {
-    document.getElementById("authOverlay").classList.add("hidden");
-    return true;
-  }
+async function checkAuth() {
+  try {
+    const res = await fetch("/api/settings");
+    if (res.ok) {
+      document.getElementById("authOverlay").classList.add("hidden");
+      return true;
+    }
+  } catch {}
   document.getElementById("authOverlay").classList.remove("hidden");
-  document.getElementById("authPassword").focus();
+  document.getElementById("authUsername").focus();
   return false;
 }
 
-function logout() {
-  authToken = "";
-  localStorage.removeItem("authToken");
-  checkAuth();
+async function logout() {
+  try { await fetch("/api/logout", { method: "POST" }); } catch {}
+  document.getElementById("authOverlay").classList.remove("hidden");
+  document.getElementById("authUsername").focus();
 }
 
 // Search functions
@@ -2338,6 +2437,7 @@ function applyFilterAndSort() {
   }
 
   renderGrid(filteredItems);
+  updateStatusBar();
 }
 
 const IMAGE_EXTS = new Set(["jpg","jpeg","png","gif","webp","svg","bmp","ico"]);
@@ -2419,7 +2519,7 @@ function showMediaItem(index) {
   const container = document.getElementById("mediaContainer");
   // Remove leading slash from absolute path for URL construction
   const urlPath = item.path.startsWith('/') ? item.path.slice(1) : item.path;
-  const url = "/files/" + encodeURIComponent(urlPath).replace(/%2F/g, "/") + "?token=" + authToken;
+  const url = "/files/" + encodeURIComponent(urlPath).replace(/%2F/g, "/");
 
   // Clear container
   container.textContent = "";
@@ -2467,7 +2567,7 @@ function openTextPreview(index) {
 
   // If file is too large, fall back to download
   if (item.size > TEXT_PREVIEW_MAX_SIZE) {
-    window.open("/api/download?path=" + encodeURIComponent(item.path) + "&token=" + authToken);
+    window.open("/api/download?path=" + encodeURIComponent(item.path));
     return;
   }
 
@@ -2497,7 +2597,7 @@ function openTextPreview(index) {
 
   // Fetch file content
   const urlPath = item.path.startsWith('/') ? item.path.slice(1) : item.path;
-  const url = "/files/" + encodeURIComponent(urlPath).replace(/%2F/g, "/") + "?token=" + authToken;
+  const url = "/files/" + encodeURIComponent(urlPath).replace(/%2F/g, "/");
 
   fetch(url)
     .then(res => {
@@ -2538,7 +2638,7 @@ function openTextPreview(index) {
 
 function downloadCurrentPreview() {
   if (!currentTextItem) return;
-  window.open("/api/download?path=" + encodeURIComponent(currentTextItem.path) + "&token=" + authToken);
+  window.open("/api/download?path=" + encodeURIComponent(currentTextItem.path));
 }
 
 function prevMedia() {
@@ -2901,7 +3001,9 @@ function formatSize(bytes) {
 
 function formatDate(dateStr) {
   const d = new Date(dateStr);
-  return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  const date = d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  const time = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  return date + " " + time;
 }
 
 function isImage(name) {
@@ -2921,7 +3023,7 @@ let systemInfo = null;
 async function loadSystemInfo() {
   try {
     const pathParam = currentPath ? `?path=${encodeURIComponent(currentPath)}` : "";
-    const res = await fetch("/api/info" + pathParam, { headers: authHeaders() });
+    const res = await fetch("/api/info" + pathParam);
     if (!res.ok) return;
     systemInfo = await res.json();
     if (systemInfo.machine && systemInfo.machine.defaultDir) {
@@ -3008,7 +3110,7 @@ document.addEventListener('click', (e) => {
 
 async function loadDrives() {
   try {
-    const res = await fetch("/api/drives", { headers: authHeaders() });
+    const res = await fetch("/api/drives");
     if (!res.ok) return;
     drives = await res.json();
     renderDrives();
@@ -3050,7 +3152,7 @@ function renderDrives() {
 
 async function loadTree(parentPath = "/") {
   try {
-    const res = await fetch("/api/tree?path=" + encodeURIComponent(parentPath), { headers: authHeaders() });
+    const res = await fetch("/api/tree?path=" + encodeURIComponent(parentPath));
     if (!res.ok) return [];
     return await res.json();
   } catch (err) {
@@ -3217,13 +3319,21 @@ function copyToClip(btn, text) {
   document.body.removeChild(textarea);
 }
 
-async function navigate(path, { pushHistory = true } = {}) {
+async function navigate(path, { pushHistory = true, navPush = true } = {}) {
   currentPath = path || defaultDir;
 
   // Push browser history state so back/forward buttons navigate folders
   if (pushHistory) {
     history.pushState({ path: currentPath }, "", "#" + encodeURIComponent(currentPath));
   }
+
+  // Track navigation history for back/forward buttons
+  if (navPush) {
+    navHistory = navHistory.slice(0, navHistoryIndex + 1);
+    navHistory.push(currentPath);
+    navHistoryIndex = navHistory.length - 1;
+  }
+  updateNavButtons();
 
   updateBreadcrumb();
   updateFullPath();
@@ -3241,13 +3351,10 @@ async function navigate(path, { pushHistory = true } = {}) {
   try {
     let listUrl = "/api/list?path=" + encodeURIComponent(currentPath);
     if (showHiddenFiles) listUrl += "&hidden=true";
-    const res = await fetch(listUrl, {
-      headers: authHeaders()
-    });
+    const res = await fetch(listUrl);
     if (res.status === 401) {
-      authToken = "";
-      localStorage.removeItem("authToken");
-      checkAuth();
+      document.getElementById("authOverlay").classList.remove("hidden");
+      document.getElementById("authUsername").focus();
       return;
     }
     currentItems = await res.json();
@@ -3261,9 +3368,105 @@ async function navigate(path, { pushHistory = true } = {}) {
 // Browser back/forward button navigates folders
 window.addEventListener("popstate", (e) => {
   if (e.state && e.state.path) {
-    navigate(e.state.path, { pushHistory: false });
+    navigate(e.state.path, { pushHistory: false, navPush: false });
   }
 });
+
+// Navigation back/forward/up
+function navigateBack() {
+  if (navHistoryIndex > 0) {
+    navHistoryIndex--;
+    navigate(navHistory[navHistoryIndex], { pushHistory: true, navPush: false });
+  }
+}
+
+function navigateForward() {
+  if (navHistoryIndex < navHistory.length - 1) {
+    navHistoryIndex++;
+    navigate(navHistory[navHistoryIndex], { pushHistory: true, navPush: false });
+  }
+}
+
+function navigateUp() {
+  if (!currentPath || currentPath === "/") return;
+  const parent = currentPath.replace(/\/[^/]+\/?$/, "") || "/";
+  navigate(parent);
+}
+
+function updateNavButtons() {
+  const backBtn = document.getElementById("navBack");
+  const fwdBtn = document.getElementById("navForward");
+  const upBtn = document.getElementById("navUp");
+  if (backBtn) backBtn.disabled = navHistoryIndex <= 0;
+  if (fwdBtn) fwdBtn.disabled = navHistoryIndex >= navHistory.length - 1;
+  if (upBtn) upBtn.disabled = !currentPath || currentPath === "/";
+}
+
+// Status bar
+function updateStatusBar() {
+  const countEl = document.getElementById("statusItemCount");
+  const selEl = document.getElementById("statusSelection");
+  const selDiv = document.getElementById("statusSelDivider");
+  const diskEl = document.getElementById("statusDisk");
+  if (!countEl) return;
+
+  const totalItems = filteredItems.length;
+  const folders = filteredItems.filter(i => i.isDirectory).length;
+  const files = totalItems - folders;
+  let countText = totalItems + " item" + (totalItems !== 1 ? "s" : "");
+  if (folders > 0 && files > 0) {
+    countText = folders + " folder" + (folders !== 1 ? "s" : "") + ", " + files + " file" + (files !== 1 ? "s" : "");
+  }
+  countEl.textContent = countText;
+
+  if (selectedPaths.size > 0) {
+    const selected = getSelectedItems();
+    const totalSize = selected.reduce((sum, item) => sum + (item.isDirectory ? 0 : item.size), 0);
+    selEl.textContent = selected.length + " selected (" + formatSize(totalSize) + ")";
+    selDiv.style.display = "";
+  } else {
+    selEl.textContent = "";
+    selDiv.style.display = "none";
+  }
+
+  if (systemInfo && systemInfo.disk) {
+    diskEl.textContent = formatSize(systemInfo.disk.free) + " free";
+  }
+}
+
+// Breadcrumb edit (editable address bar)
+function startBreadcrumbEdit(event) {
+  if (event.target.tagName === "A") return;
+  const wrapper = document.getElementById("breadcrumbWrapper");
+  const inner = document.getElementById("breadcrumb");
+  const input = document.getElementById("breadcrumbEditInput");
+  wrapper.classList.add("editing");
+  inner.style.display = "none";
+  input.style.display = "block";
+  input.value = currentPath || "/";
+  input.focus();
+  input.select();
+}
+
+function handleBreadcrumbEditKey(event) {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    const path = document.getElementById("breadcrumbEditInput").value.trim();
+    cancelBreadcrumbEdit();
+    if (path) navigate(path);
+  } else if (event.key === "Escape") {
+    cancelBreadcrumbEdit();
+  }
+}
+
+function cancelBreadcrumbEdit() {
+  const wrapper = document.getElementById("breadcrumbWrapper");
+  const inner = document.getElementById("breadcrumb");
+  const input = document.getElementById("breadcrumbEditInput");
+  wrapper.classList.remove("editing");
+  inner.style.display = "flex";
+  input.style.display = "none";
+}
 
 function showLoadingSkeletons() {
   const grid = document.getElementById("fileGrid");
@@ -3360,7 +3563,7 @@ function renderGrid(items) {
   grid.innerHTML = items.map((item, index) => {
     // Remove leading slash from absolute path for URL construction
     const urlPath = item.path.startsWith('/') ? item.path.slice(1) : item.path;
-    const imgUrl = `/files/${encodeURIComponent(urlPath).replace(/%2F/g, '/')}?token=${authToken}`;
+    const imgUrl = `/files/${encodeURIComponent(urlPath).replace(/%2F/g, '/')}`;
     const preview = item.isDirectory
       ? `<div class="icon-large">${getFileIcon(item.name, true)}</div>`
       : isImage(item.name)
@@ -3445,7 +3648,7 @@ async function handleFileDrop(event, targetIndex) {
   try {
     const res = await fetch("/api/move", {
       method: "POST",
-      headers: { "Content-Type": "application/json", ...authHeaders() },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ sourcePath, destPath })
     });
 
@@ -3493,7 +3696,7 @@ function handleClick(event, index) {
   } else if (isTextFile(item.name)) {
     openTextPreview(index);
   } else {
-    window.open("/api/download?path=" + encodeURIComponent(item.path) + "&token=" + authToken);
+    window.open("/api/download?path=" + encodeURIComponent(item.path));
   }
 }
 
@@ -3567,6 +3770,7 @@ function updateSelectionUI() {
     grid.classList.remove("has-selection");
   }
   updateSelectedPath();
+  updateStatusBar();
 }
 
 function getSelectedItems() {
@@ -3662,7 +3866,7 @@ async function confirmRename() {
   try {
     await fetch("/api/rename", {
       method: "POST",
-      headers: { "Content-Type": "application/json", ...authHeaders() },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ oldPath: contextTarget.path, newName }),
     });
     toast("Renamed to " + newName, "success");
@@ -3683,7 +3887,7 @@ function deleteItem() {
   if (!confirm(`Delete "${contextTarget.name}"? This cannot be undone.`)) return;
   fetch("/api/delete", {
     method: "DELETE",
-    headers: { "Content-Type": "application/json", ...authHeaders() },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ path: contextTarget.path }),
   }).then(() => {
     toast("Deleted " + contextTarget.name, "success");
@@ -3707,7 +3911,7 @@ async function deleteSelected() {
     try {
       const res = await fetch("/api/delete", {
         method: "DELETE",
-        headers: { "Content-Type": "application/json", ...authHeaders() },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ path: item.path }),
       });
       if (res.ok) successCount++;
@@ -3733,7 +3937,7 @@ function downloadItem() {
     return;
   }
   if (!contextTarget) return;
-  window.open("/api/download?path=" + encodeURIComponent(contextTarget.path) + "&token=" + authToken);
+  window.open("/api/download?path=" + encodeURIComponent(contextTarget.path));
 }
 
 function downloadSelected() {
@@ -3752,7 +3956,7 @@ function downloadSelected() {
     // Stagger downloads slightly to avoid browser blocking
     setTimeout(() => {
       const a = document.createElement("a");
-      a.href = "/api/download?path=" + encodeURIComponent(item.path) + "&token=" + authToken;
+      a.href = "/api/download?path=" + encodeURIComponent(item.path);
       a.download = item.name;
       document.body.appendChild(a);
       a.click();
@@ -3775,7 +3979,7 @@ async function confirmFolder() {
   try {
     await fetch("/api/mkdir", {
       method: "POST",
-      headers: { "Content-Type": "application/json", ...authHeaders() },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ path: currentPath, name }),
     });
     toast("Created folder: " + name, "success");
@@ -3838,7 +4042,7 @@ async function uploadFiles(files) {
       bar.classList.remove("visible");
     };
     xhr.open("POST", "/api/upload?path=" + encodeURIComponent(currentPath));
-    xhr.setRequestHeader("X-Auth-Token", authToken);
+    // Cookie sent automatically
     xhr.send(formData);
   } catch {
     toast("Upload failed", "error");
@@ -3889,6 +4093,12 @@ document.addEventListener("keydown", e => {
     }
     return; // Don't process other shortcuts when media is open
   }
+
+  // Navigation shortcuts
+  if (e.altKey && e.key === "ArrowLeft") { e.preventDefault(); navigateBack(); return; }
+  if (e.altKey && e.key === "ArrowRight") { e.preventDefault(); navigateForward(); return; }
+  if (e.altKey && e.key === "ArrowUp") { e.preventDefault(); navigateUp(); return; }
+  if (e.key === "F5") { e.preventDefault(); navigate(currentPath); return; }
 
   if (e.key === "Escape") {
     document.querySelectorAll(".modal-overlay").forEach(el => el.classList.remove("visible"));
@@ -3954,6 +4164,7 @@ async function initApp() {
   // Set initial history state and navigate to default directory
   history.replaceState({ path: defaultDir }, "", "#" + encodeURIComponent(defaultDir));
   navigate(defaultDir, { pushHistory: false });
+  updateStatusBar();
 }
 
 // Startup: check setup status, then auth
@@ -3967,7 +4178,7 @@ async function initApp() {
   } else {
     // Hide setup overlay, check auth
     document.getElementById("setupOverlay").classList.add("hidden");
-    if (checkAuth()) {
+    if (await checkAuth()) {
       initApp();
     }
   }
