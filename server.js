@@ -5,6 +5,7 @@ const fs = require("fs/promises");
 const fsSync = require("fs");
 const os = require("os");
 const crypto = require("crypto");
+const archiver = require("archiver");
 
 const app = express();
 
@@ -729,23 +730,89 @@ app.post("/api/logout", (_req, res) => {
   res.json({ ok: true });
 });
 
-// API: Download file (auth via cookie)
-app.get("/api/download", (req, res) => {
+// API: Get file/folder properties
+app.get("/api/properties", requireAuth, async (req, res) => {
+  try {
+    const target = safePath(req.query.path);
+    const stat = await fs.stat(target);
+    const props = {
+      name: path.basename(target),
+      path: target,
+      isDirectory: stat.isDirectory(),
+      size: stat.size,
+      created: stat.birthtime,
+      modified: stat.mtime,
+      accessed: stat.atime,
+      permissions: '0' + (stat.mode & 0o777).toString(8),
+    };
+
+    // For directories, calculate recursive size
+    if (stat.isDirectory()) {
+      let totalSize = 0;
+      let fileCount = 0;
+      let folderCount = 0;
+      async function walk(dir) {
+        try {
+          const entries = await fs.readdir(dir, { withFileTypes: true });
+          for (const entry of entries) {
+            const full = path.join(dir, entry.name);
+            if (entry.isDirectory()) {
+              folderCount++;
+              await walk(full);
+            } else {
+              fileCount++;
+              try {
+                const s = await fs.stat(full);
+                totalSize += s.size;
+              } catch {}
+            }
+          }
+        } catch {}
+      }
+      await walk(target);
+      props.totalSize = totalSize;
+      props.fileCount = fileCount;
+      props.folderCount = folderCount;
+    }
+
+    res.json(props);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// API: Download file or folder as ZIP (auth via cookie)
+app.get("/api/download", async (req, res) => {
   const cookies = parseCookies(req.headers.cookie);
   if (!validateAuthToken(cookies.auth)) {
     return res.status(401).json({ error: "Unauthorized" });
   }
   try {
     const file = safePath(req.query.path);
+    const stat = await fs.stat(file);
     const fileName = path.basename(file);
-    const ext = path.extname(file).toLowerCase();
-    const mimeType = MIME_TYPES[ext] || 'application/octet-stream';
 
-    res.setHeader('Content-Type', mimeType);
-    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
-    res.setHeader('X-Content-Type-Options', 'nosniff');
+    if (stat.isDirectory()) {
+      // Stream folder as ZIP
+      res.setHeader('Content-Type', 'application/zip');
+      res.setHeader('Content-Disposition', `attachment; filename="${fileName}.zip"`);
+      res.setHeader('X-Content-Type-Options', 'nosniff');
 
-    res.download(file, fileName);
+      const archive = archiver('zip', { zlib: { level: 5 } });
+      archive.on('error', (err) => { throw err; });
+      archive.pipe(res);
+      archive.directory(file, fileName);
+      await archive.finalize();
+    } else {
+      const ext = path.extname(file).toLowerCase();
+      const mimeType = MIME_TYPES[ext] || 'application/octet-stream';
+
+      res.setHeader('Content-Type', mimeType);
+      res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+
+      res.download(file, fileName);
+    }
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

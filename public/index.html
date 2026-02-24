@@ -1654,6 +1654,22 @@
     outline: none;
   }
 
+  /* Properties modal */
+  .props-grid {
+    display: grid;
+    grid-template-columns: 120px 1fr;
+    gap: 8px 12px;
+    font-size: 13px;
+  }
+  .props-grid .prop-label {
+    color: var(--text-muted);
+    font-weight: 500;
+  }
+  .props-grid .prop-value {
+    color: var(--text);
+    word-break: break-all;
+  }
+
   /* View toggle button */
   .view-toggle {
     display: flex;
@@ -2269,6 +2285,17 @@
   </div>
 </div>
 
+<!-- Properties modal -->
+<div class="modal-overlay" id="propsModal" onclick="if(event.target===this)closeModal('propsModal')">
+  <div class="modal" style="min-width:400px;">
+    <h3 id="propsTitle">Properties</h3>
+    <div id="propsContent" class="props-grid"></div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal('propsModal')">Close</button>
+    </div>
+  </div>
+</div>
+
 <!-- New File modal -->
 <div class="modal-overlay" id="newFileModal">
   <div class="modal">
@@ -2625,7 +2652,6 @@ const TEXT_PREVIEW_MAX_SIZE = 1024 * 1024; // 1 MB
 let mediaItems = [];
 let currentMediaIndex = 0;
 let isDarkTheme = true;
-let draggedItem = null;
 
 // Theme toggle
 function toggleTheme() {
@@ -3741,7 +3767,7 @@ function renderGrid(items) {
 
     const isSelected = selectedPaths.has(item.path);
     const checkSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="20 6 9 17 4 12"/></svg>';
-    const draggable = !item.isDirectory ? 'draggable="true"' : '';
+    const draggable = 'draggable="true"';
     const dropTarget = item.isDirectory ? 'ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleFileDrop(event, ' + index + ')"' : '';
     return `
       <div class="file-item${isSelected ? ' selected' : ''}"
@@ -4114,74 +4140,144 @@ function startInlineRename(index) {
   input.onblur = () => finish(true);
 }
 
-// Drag to move functionality
+// Drag to move/copy functionality (folders + files, multi-drag, Ctrl+drag=copy)
+let draggedItems = [];
+let dragIsCopy = false;
+
 function handleDragStart(event, index) {
   const item = filteredItems[index];
-  if (!item || item.isDirectory) {
-    event.preventDefault();
-    return;
+  if (!item) { event.preventDefault(); return; }
+
+  // Multi-drag: if dragging a selected item, drag all selected
+  if (selectedPaths.has(item.path) && selectedPaths.size > 1) {
+    draggedItems = getSelectedItems();
+  } else {
+    draggedItems = [item];
   }
-  draggedItem = item;
+  dragIsCopy = event.ctrlKey || event.metaKey;
+
   event.target.classList.add("dragging");
-  event.dataTransfer.effectAllowed = "move";
-  event.dataTransfer.setData("text/plain", item.path);
+  event.dataTransfer.effectAllowed = dragIsCopy ? "copy" : "move";
+  event.dataTransfer.setData("text/plain", draggedItems.map(i => i.path).join("\n"));
+
+  // Custom drag image with count badge
+  if (draggedItems.length > 1) {
+    const badge = document.createElement("div");
+    badge.style.cssText = "position:fixed;top:-100px;padding:6px 12px;background:var(--accent,#3b82f6);color:#fff;border-radius:20px;font-size:13px;font-weight:600;white-space:nowrap;";
+    badge.textContent = draggedItems.length + " items";
+    document.body.appendChild(badge);
+    event.dataTransfer.setDragImage(badge, 0, 0);
+    setTimeout(() => badge.remove(), 0);
+  }
 }
 
 function handleDragEnd(event) {
   event.target.classList.remove("dragging");
-  document.querySelectorAll(".file-item.drag-over").forEach(el => el.classList.remove("drag-over"));
-  draggedItem = null;
+  document.querySelectorAll(".drag-over").forEach(el => el.classList.remove("drag-over"));
+  draggedItems = [];
 }
 
 function handleDragOver(event) {
   event.preventDefault();
-  event.dataTransfer.dropEffect = "move";
-  const target = event.target.closest(".file-item");
+  event.dataTransfer.dropEffect = (event.ctrlKey || event.metaKey) ? "copy" : "move";
+  const target = event.target.closest(".file-item, .details-row");
   if (target && target.dataset.isdir === "true") {
     target.classList.add("drag-over");
   }
 }
 
 function handleDragLeave(event) {
-  const target = event.target.closest(".file-item");
-  if (target) {
-    target.classList.remove("drag-over");
-  }
+  const target = event.target.closest(".file-item, .details-row");
+  if (target) target.classList.remove("drag-over");
 }
 
 async function handleFileDrop(event, targetIndex) {
   event.preventDefault();
   event.stopPropagation();
 
-  const target = event.target.closest(".file-item");
+  const target = event.target.closest(".file-item, .details-row");
   if (target) target.classList.remove("drag-over");
 
   const targetItem = filteredItems[targetIndex];
-  if (!targetItem || !targetItem.isDirectory || !draggedItem) return;
+  if (!targetItem || !targetItem.isDirectory || draggedItems.length === 0) return;
 
-  const sourcePath = draggedItem.path;
-  const fileName = draggedItem.name;
-  const destPath = targetItem.path + "/" + fileName;
+  const isCopy = event.ctrlKey || event.metaKey || dragIsCopy;
+  const endpoint = isCopy ? "/api/copy" : "/api/move";
+  const verb = isCopy ? "Copied" : "Moved";
+  let ok = 0, fail = 0;
 
-  try {
-    const res = await fetch("/api/move", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sourcePath, destPath })
-    });
-
-    if (res.ok) {
-      toast(`Moved "${fileName}" to "${targetItem.name}"`, "success");
-      navigate(currentPath);
-    } else {
-      const err = await res.json();
-      toast(err.error || "Move failed", "error");
-    }
-  } catch {
-    toast("Move failed", "error");
+  for (const item of draggedItems) {
+    // Don't drop a folder into itself
+    if (item.path === targetItem.path) continue;
+    const destPath = targetItem.path + "/" + item.name;
+    try {
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sourcePath: item.path, destPath })
+      });
+      if (res.ok) ok++; else fail++;
+    } catch { fail++; }
   }
 
-  draggedItem = null;
+  if (ok > 0) toast(verb + " " + ok + " item(s) to " + targetItem.name, "success");
+  if (fail > 0) toast("Failed: " + fail + " item(s)", "error");
+  draggedItems = [];
+  navigate(currentPath);
+}
+
+// Properties panel
+async function showProperties(itemPath) {
+  if (!itemPath) {
+    const selected = getSelectedItems();
+    if (selected.length === 1) itemPath = selected[0].path;
+    else if (focusedIndex >= 0) itemPath = filteredItems[focusedIndex].path;
+    else return;
+  }
+
+  const content = document.getElementById("propsContent");
+  content.textContent = "Loading...";
+  document.getElementById("propsTitle").textContent = "Properties";
+  document.getElementById("propsModal").classList.add("visible");
+
+  try {
+    const res = await fetch("/api/properties?path=" + encodeURIComponent(itemPath));
+    if (!res.ok) throw new Error("Failed");
+    const p = await res.json();
+
+    document.getElementById("propsTitle").textContent = p.name + " - Properties";
+    content.textContent = "";
+    content.className = "props-grid";
+
+    const rows = [
+      ["Name", p.name],
+      ["Type", p.isDirectory ? "Folder" : getFileType(p.name, false)],
+      ["Location", p.path],
+    ];
+    if (p.isDirectory) {
+      rows.push(["Contains", p.fileCount + " files, " + p.folderCount + " folders"]);
+      rows.push(["Size", formatSize(p.totalSize)]);
+    } else {
+      rows.push(["Size", formatSize(p.size)]);
+    }
+    rows.push(["Created", new Date(p.created).toLocaleString()]);
+    rows.push(["Modified", new Date(p.modified).toLocaleString()]);
+    rows.push(["Accessed", new Date(p.accessed).toLocaleString()]);
+    rows.push(["Permissions", p.permissions]);
+
+    rows.forEach(([label, value]) => {
+      const lbl = document.createElement("div");
+      lbl.className = "prop-label";
+      lbl.textContent = label;
+      content.appendChild(lbl);
+      const val = document.createElement("div");
+      val.className = "prop-value";
+      val.textContent = value;
+      content.appendChild(val);
+    });
+  } catch {
+    content.textContent = "Failed to load properties";
+  }
 }
 
 function handleClick(event, index) {
@@ -4342,6 +4438,11 @@ function showContext(event, index) {
   }
   menuItems.push({ separator: true });
   menuItems.push({ icon: delIcon, label: count > 1 ? "Delete " + count + " items" : "Delete", danger: true, fn: () => { hideContextMenu(); deleteItem(); } });
+  if (count === 1) {
+    menuItems.push({ separator: true });
+    const propsIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>';
+    menuItems.push({ icon: propsIcon, label: "Properties", fn: () => { hideContextMenu(); showProperties(contextTarget.path); } });
+  }
 
   buildContextMenu(menuItems);
   const menu = document.getElementById("contextMenu");
@@ -4480,15 +4581,8 @@ function downloadSelected() {
   const selected = getSelectedItems();
   if (selected.length === 0) return;
 
-  // Filter out directories for individual downloads (folders can't be downloaded directly)
-  const files = selected.filter(item => !item.isDirectory);
-  if (files.length === 0) {
-    toast("No files selected (folders cannot be downloaded)", "error");
-    return;
-  }
-
-  // Download each file
-  files.forEach((item, i) => {
+  // Download each item (folders download as ZIP)
+  selected.forEach((item, i) => {
     // Stagger downloads slightly to avoid browser blocking
     setTimeout(() => {
       const a = document.createElement("a");
@@ -4500,7 +4594,7 @@ function downloadSelected() {
     }, i * 200);
   });
 
-  toast(`Downloading ${files.length} file(s)`, "success");
+  toast("Downloading " + selected.length + " item(s)", "success");
 }
 
 function createFolder() {
@@ -4634,6 +4728,7 @@ document.addEventListener("keydown", e => {
   if (e.altKey && e.key === "ArrowLeft") { e.preventDefault(); navigateBack(); return; }
   if (e.altKey && e.key === "ArrowRight") { e.preventDefault(); navigateForward(); return; }
   if (e.altKey && e.key === "ArrowUp") { e.preventDefault(); navigateUp(); return; }
+  if (e.altKey && e.key === "Enter") { e.preventDefault(); showProperties(); return; }
   if (e.key === "F5") { e.preventDefault(); navigate(currentPath); return; }
 
   if (e.key === "Escape") {
