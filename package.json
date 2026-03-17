@@ -11,7 +11,10 @@
   "license": "ISC",
   "dependencies": {
     "archiver": "^7.0.1",
+    "bcryptjs": "^3.0.3",
+    "compression": "^1.8.1",
     "express": "^5.2.1",
+    "helmet": "^8.1.0",
     "multer": "^2.0.2"
   }
 }

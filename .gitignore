@@ -1,5 +1,6 @@
 node_modules/
 data/
+certs/
 .DS_Store
 *.log
 public/*.zip

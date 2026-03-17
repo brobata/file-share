@@ -12,7 +12,7 @@
     --surface2: #1e1e1e;
     --border: #2a2a2a;
     --text: #e4e4e7;
-    --text-muted: #71717a;
+    --text-muted: #8a8a93;
     --accent: #3b82f6;
     --accent-hover: #2563eb;
     --danger: #ef4444;
@@ -507,7 +507,8 @@
     letter-spacing: 2px;
     margin-bottom: 16px;
   }
-  .auth-box input:focus { border-color: var(--accent); outline: none; }
+  .auth-box input:focus { border-color: var(--accent); outline: 2px solid var(--accent); outline-offset: -2px; }
+  .auth-box input:focus:not(:focus-visible) { outline: none; }
   .auth-box .auth-error {
     color: var(--danger);
     font-size: 13px;
@@ -552,7 +553,8 @@
     color: var(--text);
     font-size: 14px;
   }
-  .search-box input:focus { border-color: var(--accent); outline: none; }
+  .search-box input:focus { border-color: var(--accent); outline: 2px solid var(--accent); outline-offset: -2px; }
+  .search-box input:focus:not(:focus-visible) { outline: none; }
   .search-box input::placeholder { color: var(--text-muted); }
   .search-box svg {
     position: absolute;
@@ -921,7 +923,7 @@
   .file-item .preview img {
     width: 100%;
     height: 100%;
-    object-fit: cover;
+    object-fit: contain;
   }
   .file-item .preview .icon-large {
     font-size: 40px;
@@ -1047,9 +1049,9 @@
     background: var(--bg);
     color: var(--text);
     font-size: 14px;
-    outline: none;
   }
-  .modal input[type="text"]:focus { border-color: var(--accent); }
+  .modal input[type="text"]:focus { border-color: var(--accent); outline: 2px solid var(--accent); outline-offset: -2px; }
+  .modal input[type="text"]:focus:not(:focus-visible) { outline: none; }
   .modal .modal-actions {
     display: flex;
     gap: 8px;
@@ -1505,7 +1507,6 @@
     color: var(--text);
     font-family: 'SF Mono', 'Consolas', monospace;
     font-size: 13px;
-    outline: none;
     padding: 0;
   }
 
@@ -1651,7 +1652,6 @@
     color: var(--text);
     font-size: 12px;
     font-family: inherit;
-    outline: none;
   }
 
   /* Properties modal */
@@ -2628,7 +2628,7 @@
 
 <div class="app-layout">
   <!-- Sidebar -->
-  <div class="sidebar" id="sidebar">
+  <nav class="sidebar" id="sidebar" aria-label="File explorer sidebar">
     <div class="sidebar-header">
       <span>Explorer</span>
       <button class="sidebar-toggle" onclick="toggleSidebar()" title="Hide sidebar">
@@ -2642,11 +2642,11 @@
     <div class="tree-section" id="treeSection">
       <!-- Folder tree will be loaded here -->
     </div>
-  </div>
+  </nav>
   <div class="sidebar-backdrop" id="sidebarBackdrop" onclick="toggleSidebar()"></div>
 
   <!-- Main content -->
-  <div class="main-content">
+  <main class="main-content" aria-label="File browser">
 
 <div class="system-bar" id="systemBar">
   <div class="sys-item">
@@ -2948,7 +2948,7 @@
   <span class="status-section" id="statusDisk" style="margin-left:auto"></span>
 </div>
 
-  </div><!-- end main-content -->
+  </main><!-- end main-content -->
 
   <!-- Preview pane -->
   <div class="preview-pane hidden" id="previewPane">
@@ -3008,8 +3008,8 @@ async function submitSetup() {
   const allowFullFilesystem = document.getElementById("setupFilesystem").checked;
   const errorEl = document.getElementById("setupError");
 
-  if (!password) {
-    errorEl.textContent = "Password is required";
+  if (!password || password.length < 8) {
+    errorEl.textContent = "Password must be at least 8 characters";
     errorEl.classList.add("visible");
     return;
   }
@@ -3816,7 +3816,7 @@ function getFileIcon(name, isDir) {
 function formatSize(bytes) {
   if (bytes === 0) return "0 B";
   const k = 1024;
-  const sizes = ["B", "KB", "MB", "GB"];
+  const sizes = ["B", "KB", "MB", "GB", "TB"];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return (bytes / Math.pow(k, i)).toFixed(i > 0 ? 1 : 0) + " " + sizes[i];
 }
@@ -4144,6 +4144,8 @@ function copyToClip(btn, text) {
 async function navigate(path, { pushHistory = true, navPush = true } = {}) {
   // Save current folder state before navigating away
   if (currentPath) saveFolderState();
+  const isRefresh = (path || defaultDir) === currentPath;
+  const savedScrollY = isRefresh ? window.scrollY : 0;
   currentPath = path || defaultDir;
 
   // Push browser history state so back/forward buttons navigate folders
@@ -4164,13 +4166,15 @@ async function navigate(path, { pushHistory = true, navPush = true } = {}) {
   updateSelectedPath();
   highlightTreePath(currentPath);
   document.getElementById("dropPath").textContent = currentPath;
-  document.getElementById("searchInput").value = "";
-  searchQuery = "";
-  document.getElementById("clearSearch").classList.remove("visible");
+  if (!isRefresh) {
+    document.getElementById("searchInput").value = "";
+    searchQuery = "";
+    document.getElementById("clearSearch").classList.remove("visible");
+  }
   clearSelection();
 
-  // Show loading skeletons
-  showLoadingSkeletons();
+  // Show loading skeletons only when navigating to a different folder
+  if (!isRefresh) showLoadingSkeletons();
 
   try {
     let listUrl = "/api/list?path=" + encodeURIComponent(currentPath);
@@ -4186,6 +4190,7 @@ async function navigate(path, { pushHistory = true, navPush = true } = {}) {
     applyFilterAndSort();
     renderFavorites();
     updatePinButton();
+    if (isRefresh) window.scrollTo(0, savedScrollY);
   } catch (err) {
     toast("Failed to load directory", "error");
     document.getElementById("fileGrid").textContent = "";
@@ -4388,40 +4393,69 @@ function renderGrid(items) {
   }
   empty.style.display = "none";
 
-  grid.innerHTML = items.map((item, index) => {
-    // Remove leading slash from absolute path for URL construction
+  // Build grid using DOM APIs to prevent XSS from filenames
+  grid.textContent = "";
+  const checkSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="20 6 9 17 4 12"/></svg>';
+  items.forEach((item, index) => {
     const urlPath = item.path.startsWith('/') ? item.path.slice(1) : item.path;
     const imgUrl = `/files/${encodeURIComponent(urlPath).replace(/%2F/g, '/')}`;
-    const preview = item.isDirectory
-      ? `<div class="icon-large">${getFileIcon(item.name, true)}</div>`
-      : isImage(item.name)
-        ? `<img src="${imgUrl}" loading="lazy" alt="${item.name}">`
-        : `<div class="icon-large">${getFileIcon(item.name, false)}</div>`;
 
-    const isSelected = selectedPaths.has(item.path);
-    const checkSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="20 6 9 17 4 12"/></svg>';
-    const draggable = 'draggable="true"';
-    const dropTarget = item.isDirectory ? 'ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleFileDrop(event, ' + index + ')"' : '';
-    return `
-      <div class="file-item${isSelected ? ' selected' : ''}"
-           data-index="${index}"
-           data-path="${item.path}"
-           data-isdir="${item.isDirectory}"
-           ${draggable}
-           ondragstart="handleDragStart(event, ${index})"
-           ondragend="handleDragEnd(event)"
-           ${dropTarget}
-           onclick="handleClick(event, ${index})"
-           oncontextmenu="showContext(event, ${index})">
-        <div class="checkbox" onclick="event.stopPropagation(); toggleSelect(${index}, event)">${checkSvg}</div>
-        <div class="preview${item.isDirectory ? ' folder-preview' : ''}">${preview}</div>
-        <div class="info">
-          <div class="name" title="${item.name}">${item.name}</div>
-          <div class="meta">${item.isDirectory ? "Folder" : formatSize(item.size)} &middot; ${formatDate(item.modified)}</div>
-        </div>
-      </div>
-    `;
-  }).join("");
+    const div = document.createElement("div");
+    div.className = "file-item" + (selectedPaths.has(item.path) ? " selected" : "");
+    div.dataset.index = index;
+    div.dataset.path = item.path;
+    div.dataset.isdir = item.isDirectory;
+    div.draggable = true;
+    div.ondragstart = (e) => handleDragStart(e, index);
+    div.ondragend = (e) => handleDragEnd(e);
+    if (item.isDirectory) {
+      div.ondragover = (e) => handleDragOver(e);
+      div.ondragleave = (e) => handleDragLeave(e);
+      div.ondrop = (e) => handleFileDrop(e, index);
+    }
+    div.onclick = (e) => handleClick(e, index);
+    div.ondblclick = (e) => handleDblClick(e, index);
+    div.oncontextmenu = (e) => showContext(e, index);
+
+    // Checkbox
+    const cb = document.createElement("div");
+    cb.className = "checkbox";
+    cb.innerHTML = checkSvg;
+    cb.onclick = (e) => { e.stopPropagation(); toggleSelect(index, e); };
+    div.appendChild(cb);
+
+    // Preview
+    const previewDiv = document.createElement("div");
+    previewDiv.className = "preview" + (item.isDirectory ? " folder-preview" : "");
+    if (item.isDirectory) {
+      previewDiv.innerHTML = `<div class="icon-large">${getFileIcon(item.name, true)}</div>`;
+    } else if (isImage(item.name)) {
+      const img = document.createElement("img");
+      img.src = imgUrl;
+      img.loading = "lazy";
+      img.alt = item.name;
+      previewDiv.appendChild(img);
+    } else {
+      previewDiv.innerHTML = `<div class="icon-large">${getFileIcon(item.name, false)}</div>`;
+    }
+    div.appendChild(previewDiv);
+
+    // Info
+    const info = document.createElement("div");
+    info.className = "info";
+    const nameDiv = document.createElement("div");
+    nameDiv.className = "name";
+    nameDiv.title = item.name;
+    nameDiv.textContent = item.name;
+    const metaDiv = document.createElement("div");
+    metaDiv.className = "meta";
+    metaDiv.textContent = (item.isDirectory ? "Folder" : formatSize(item.size)) + " \u00b7 " + formatDate(item.modified);
+    info.appendChild(nameDiv);
+    info.appendChild(metaDiv);
+    div.appendChild(info);
+
+    grid.appendChild(div);
+  });
 }
 
 function renderCurrentView(items) {
@@ -4506,6 +4540,7 @@ function renderDetailsView(items) {
       row.ondrop = (e) => handleFileDrop(e, index);
     }
     row.onclick = (e) => handleClick(e, index);
+    row.ondblclick = (e) => handleDblClick(e, index);
     row.oncontextmenu = (e) => showContext(e, index);
 
     // Checkbox
@@ -4925,45 +4960,9 @@ async function showProperties(itemPath) {
   }
 }
 
-function handleClick(event, index) {
+function openItem(index) {
   const item = filteredItems[index];
   if (!item) return;
-
-  setFocused(index);
-
-  // Check for modifier keys for selection
-  if (event.ctrlKey || event.metaKey) {
-    toggleSelect(index, event);
-    return;
-  }
-
-  if (event.shiftKey && lastSelectedIndex !== -1) {
-    selectRange(lastSelectedIndex, index);
-    return;
-  }
-
-  // Slow double-click detection for inline rename
-  const now = Date.now();
-  if (selectedPaths.size === 1 && selectedPaths.has(item.path) && lastClickIndex === index) {
-    const elapsed = now - lastClickTime;
-    if (elapsed > 500 && elapsed < 2000) {
-      lastClickTime = 0;
-      lastClickIndex = -1;
-      startInlineRename(index);
-      return;
-    }
-  }
-  lastClickTime = now;
-  lastClickIndex = index;
-
-  // Normal click - if no selection, do default action; if has selection, just select this one
-  if (selectedPaths.size > 0) {
-    clearSelection();
-    toggleSelect(index, event);
-    return;
-  }
-
-  // Default actions
   if (item.isDirectory) {
     navigate(item.path);
   } else if (isMedia(item.name)) {
@@ -4973,6 +4972,50 @@ function handleClick(event, index) {
   } else {
     window.open("/api/download?path=" + encodeURIComponent(item.path));
   }
+}
+
+function handleClick(event, index) {
+  const item = filteredItems[index];
+  if (!item) return;
+
+  setFocused(index);
+
+  // Ctrl/Cmd click — toggle selection additively
+  if (event.ctrlKey || event.metaKey) {
+    toggleSelect(index, event);
+    return;
+  }
+
+  // Shift click — range select
+  if (event.shiftKey && lastSelectedIndex !== -1) {
+    selectRange(lastSelectedIndex, index);
+    return;
+  }
+
+  // Slow double-click detection for inline rename (only on already-selected item)
+  const now = Date.now();
+  if (selectedPaths.size === 1 && selectedPaths.has(item.path) && lastClickIndex === index) {
+    const elapsed = now - lastClickTime;
+    if (elapsed > 600 && elapsed < 2000) {
+      lastClickTime = 0;
+      lastClickIndex = -1;
+      startInlineRename(index);
+      return;
+    }
+  }
+  lastClickTime = now;
+  lastClickIndex = index;
+
+  // Single click — select this item (clear others)
+  clearSelection();
+  toggleSelect(index, event);
+}
+
+function handleDblClick(event, index) {
+  // Prevent double-click from also triggering inline rename
+  lastClickTime = 0;
+  lastClickIndex = -1;
+  openItem(index);
 }
 
 function toggleSelect(index, event) {
@@ -6138,13 +6181,7 @@ document.addEventListener("keydown", e => {
   // Enter: open focused item
   if (e.key === "Enter" && focusedIndex >= 0) {
     e.preventDefault();
-    const item = filteredItems[focusedIndex];
-    if (item) {
-      if (item.isDirectory) navigate(item.path);
-      else if (isMedia(item.name)) openMedia(focusedIndex);
-      else if (isTextFile(item.name)) openTextPreview(focusedIndex);
-      else window.open("/api/download?path=" + encodeURIComponent(item.path));
-    }
+    openItem(focusedIndex);
     return;
   }
 
@@ -6222,16 +6259,20 @@ async function initApp() {
   await loadDrives();
   await initTree();
 
-  // Set initial history state and navigate to default directory
-  history.replaceState({ path: defaultDir }, "", "#" + encodeURIComponent(defaultDir));
-  navigate(defaultDir, { pushHistory: false });
+  // Restore path from URL hash (survives page refresh), fall back to defaultDir
+  let startPath = defaultDir;
+  if (window.location.hash && window.location.hash.length > 1) {
+    startPath = decodeURIComponent(window.location.hash.slice(1));
+  }
+  history.replaceState({ path: startPath }, "", "#" + encodeURIComponent(startPath));
+  navigate(startPath, { pushHistory: false });
   updateStatusBar();
 }
 
 // ===== MOBILE-NATIVE FEATURES =====
 
 function isMobile() { return window.innerWidth < 768; }
-function haptic(ms) { if (navigator.vibrate) navigator.vibrate(ms); }
+function haptic(ms) { }
 
 // --- Bottom Action Sheet ---
 let bottomSheetDragY = 0;
@@ -6494,19 +6535,21 @@ function initPullToRefresh() {
   const grid = document.getElementById("fileGrid");
 
   grid.addEventListener("touchstart", (e) => {
-    if (grid.scrollTop === 0 && !isPulling) {
+    if (window.scrollY <= 0 && !isPulling) {
       pullStartY = e.touches[0].clientY;
+    } else {
+      pullStartY = 0;
     }
   }, { passive: true });
 
   grid.addEventListener("touchmove", (e) => {
-    if (grid.scrollTop > 0 || pullStartY === 0) return;
+    if (window.scrollY > 0 || pullStartY === 0) return;
     const dy = e.touches[0].clientY - pullStartY;
-    if (dy > 10 && dy < 150) {
+    if (dy > 20 && dy < 150) {
       isPulling = true;
       pullIndicatorEl.classList.add("active");
       pullIndicatorEl.style.transform = `translateX(-50%) translateY(${dy - 30}px)`;
-      if (dy > 60) {
+      if (dy > 80) {
         pullIndicatorEl.classList.add("ready");
       } else {
         pullIndicatorEl.classList.remove("ready");
@@ -6698,6 +6741,7 @@ function renderCompactView(items) {
     row.dataset.isdir = item.isDirectory;
     row.setAttribute("draggable", "true");
     row.onclick = (e) => handleClick(e, index);
+    row.ondblclick = (e) => handleDblClick(e, index);
     row.oncontextmenu = (e) => showContext(e, index);
     row.ondragstart = (e) => handleDragStart(e, index);
     row.ondragend = (e) => handleDragEnd(e);

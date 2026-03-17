@@ -6,8 +6,18 @@ const fsSync = require("fs");
 const os = require("os");
 const crypto = require("crypto");
 const archiver = require("archiver");
+const bcrypt = require("bcryptjs");
+const compression = require("compression");
+const helmet = require("helmet");
 
 const app = express();
+
+// --- Compression & Security Headers ---
+app.use(compression());
+app.use(helmet({
+  contentSecurityPolicy: false, // inline styles/scripts in single-file SPA
+  crossOriginEmbedderPolicy: false, // allow loading file previews
+}));
 
 // --- Cookie helpers ---
 function parseCookies(cookieHeader) {
@@ -20,9 +30,11 @@ function parseCookies(cookieHeader) {
   return cookies;
 }
 
-function setAuthCookie(res, token, rememberMe) {
+function setAuthCookie(res, req, token, rememberMe) {
   const maxAge = rememberMe ? 30 * 24 * 60 * 60 : "";
+  const secure = req.secure || req.headers["x-forwarded-proto"] === "https";
   let cookie = `auth=${token}; Path=/; HttpOnly; SameSite=Strict`;
+  if (secure) cookie += "; Secure";
   if (maxAge) cookie += `; Max-Age=${maxAge}`;
   res.setHeader("Set-Cookie", cookie);
 }
@@ -33,9 +45,11 @@ function clearAuthCookie(res) {
 
 // --- Config system ---
 const CONFIG_PATH = path.join(__dirname, "data", "config.json");
+const CONFIG_BACKUP_PATH = CONFIG_PATH + ".bak";
+const BCRYPT_ROUNDS = 12;
+const MIN_PASSWORD_LENGTH = 8;
 
 function loadConfig() {
-  // Priority: ENV vars > config.json > defaults
   const defaults = {
     port: 4040,
     sharedDir: path.join(os.homedir(), "shared"),
@@ -47,11 +61,28 @@ function loadConfig() {
   try {
     const raw = fsSync.readFileSync(CONFIG_PATH, "utf8");
     fileConfig = JSON.parse(raw);
-  } catch {
-    // No config file yet
+  } catch (err) {
+    if (err.code !== "ENOENT") {
+      // Config file exists but is corrupted — try backup
+      console.error("WARNING: config.json is corrupted, attempting backup restore");
+      try {
+        const backupRaw = fsSync.readFileSync(CONFIG_BACKUP_PATH, "utf8");
+        fileConfig = JSON.parse(backupRaw);
+        // Restore from backup
+        fsSync.writeFileSync(CONFIG_PATH, backupRaw);
+        console.log("Restored config from backup");
+      } catch {
+        console.error("CRITICAL: No valid config or backup found. Starting fresh.");
+      }
+    }
   }
 
   const merged = { ...defaults, ...fileConfig };
+
+  // Generate a separate token secret if missing
+  if (!merged.tokenSecret) {
+    merged.tokenSecret = crypto.randomBytes(32).toString("hex");
+  }
 
   // ENV overrides
   if (process.env.PORT) merged.port = parseInt(process.env.PORT, 10);
@@ -62,10 +93,8 @@ function loadConfig() {
 
   // If PASSWORD env var is set and no password hash exists, auto-configure
   if (process.env.PASSWORD && !merged.passwordHash) {
-    const salt = crypto.randomBytes(16).toString("hex");
-    const hash = crypto.createHash("sha256").update(process.env.PASSWORD + salt).digest("hex");
-    merged.passwordHash = hash;
-    merged.salt = salt;
+    merged.passwordHash = bcrypt.hashSync(process.env.PASSWORD, BCRYPT_ROUNDS);
+    merged.salt = "bcrypt"; // marker indicating bcrypt is used
     if (!merged.username) merged.username = "admin";
     saveConfig(merged);
   }
@@ -84,8 +113,18 @@ function saveConfig(cfg) {
     allowFullFilesystem: cfg.allowFullFilesystem,
     passwordHash: cfg.passwordHash,
     salt: cfg.salt,
+    tokenSecret: cfg.tokenSecret,
   };
-  fsSync.writeFileSync(CONFIG_PATH, JSON.stringify(persist, null, 2));
+  const data = JSON.stringify(persist, null, 2);
+
+  // Atomic write: write to temp, then rename
+  const tmpPath = CONFIG_PATH + ".tmp";
+  // Backup existing config before overwriting
+  if (fsSync.existsSync(CONFIG_PATH)) {
+    try { fsSync.copyFileSync(CONFIG_PATH, CONFIG_BACKUP_PATH); } catch {}
+  }
+  fsSync.writeFileSync(tmpPath, data);
+  fsSync.renameSync(tmpPath, CONFIG_PATH);
 }
 
 function isConfigured() {
@@ -94,27 +133,40 @@ function isConfigured() {
 
 function verifyPassword(password) {
   if (!config.passwordHash || !config.salt) return false;
+  // Support bcrypt hashes (start with $2) and legacy SHA-256
+  if (config.passwordHash.startsWith("$2")) {
+    return bcrypt.compareSync(password, config.passwordHash);
+  }
+  // Legacy SHA-256 path
   const hash = crypto.createHash("sha256").update(password + config.salt).digest("hex");
   return crypto.timingSafeEqual(Buffer.from(hash), Buffer.from(config.passwordHash));
 }
 
-// Token system: HMAC-based with per-token expiry
-// Token format: "<issuedAt>.<expiryMs>.<hmac>"
+function upgradePasswordHash(password) {
+  // Upgrade legacy SHA-256 hash to bcrypt on successful login
+  if (config.passwordHash && !config.passwordHash.startsWith("$2")) {
+    config.passwordHash = bcrypt.hashSync(password, BCRYPT_ROUNDS);
+    config.salt = "bcrypt";
+    saveConfig(config);
+  }
+}
+
+// Token system: HMAC-based with per-token expiry using dedicated secret
 function generateAuthToken(rememberMe) {
   const issuedAt = Date.now().toString();
   const expiryMs = rememberMe ? (30 * 24 * 60 * 60 * 1000).toString() : (24 * 60 * 60 * 1000).toString();
   const payload = issuedAt + "." + expiryMs;
-  const hmac = crypto.createHmac("sha256", config.passwordHash).update(payload).digest("hex");
+  const hmac = crypto.createHmac("sha256", config.tokenSecret).update(payload).digest("hex");
   return payload + "." + hmac;
 }
 
 function validateAuthToken(token) {
-  if (!token || !config.passwordHash) return false;
+  if (!token || !config.tokenSecret) return false;
   const parts = token.split(".");
   if (parts.length !== 3) return false;
   const [issuedAt, expiryMs, hmac] = parts;
   const payload = issuedAt + "." + expiryMs;
-  const expected = crypto.createHmac("sha256", config.passwordHash).update(payload).digest("hex");
+  const expected = crypto.createHmac("sha256", config.tokenSecret).update(payload).digest("hex");
   if (!crypto.timingSafeEqual(Buffer.from(hmac), Buffer.from(expected))) return false;
   const expiry = parseInt(expiryMs, 10);
   if (expiry > 0) {
@@ -125,11 +177,16 @@ function validateAuthToken(token) {
 }
 
 let config = loadConfig();
+// Ensure tokenSecret is persisted if newly generated
+if (!config._savedTokenSecret) {
+  saveConfig(config);
+}
 
 // --- Rate limiting ---
-const rateLimitMap = new Map(); // ip -> { count, resetTime }
+const rateLimitMap = new Map();
 const RATE_LIMIT_MAX = 5;
-const RATE_LIMIT_WINDOW = 60 * 1000; // 1 minute
+const RATE_LIMIT_WINDOW = 60 * 1000;
+const RATE_LIMIT_MAP_MAX = 10000;
 
 function rateLimit(req, res, next) {
   const ip = req.ip || req.socket.remoteAddress;
@@ -137,6 +194,9 @@ function rateLimit(req, res, next) {
   let entry = rateLimitMap.get(ip);
 
   if (!entry || now > entry.resetTime) {
+    if (rateLimitMap.size >= RATE_LIMIT_MAP_MAX && !entry) {
+      return res.status(429).json({ error: "Too many requests" });
+    }
     entry = { count: 0, resetTime: now + RATE_LIMIT_WINDOW };
     rateLimitMap.set(ip, entry);
   }
@@ -152,7 +212,6 @@ function rateLimit(req, res, next) {
   next();
 }
 
-// Clean up stale rate limit entries every 5 minutes
 setInterval(() => {
   const now = Date.now();
   for (const [ip, entry] of rateLimitMap) {
@@ -178,7 +237,6 @@ function getMachineInfo() {
   return { hostname, ipAddress, port: config.port, defaultDir: config.sharedDir };
 }
 
-// Get disk usage for a directory
 async function getDiskUsage(dir = config.sharedDir) {
   try {
     const stats = await fs.statfs(dir);
@@ -191,16 +249,65 @@ async function getDiskUsage(dir = config.sharedDir) {
   }
 }
 
-// Security: resolve and verify paths
+// --- Path security ---
+
+// Validate a filename component (no path separators, no traversal)
+function validateName(name) {
+  if (!name || typeof name !== "string") {
+    throw new Error("Name is required");
+  }
+  if (name.length > 255) {
+    throw new Error("Name too long");
+  }
+  if (name.includes("/") || name.includes("\\") || name.includes("\0")) {
+    throw new Error("Invalid characters in name");
+  }
+  if (name === "." || name === "..") {
+    throw new Error("Invalid name");
+  }
+  return name;
+}
+
+// Sanitize an uploaded filename
+function sanitizeFilename(name) {
+  // Extract just the basename (strip any path components)
+  let sanitized = path.basename(name);
+  // Remove null bytes
+  sanitized = sanitized.replace(/\0/g, "");
+  // Fallback if empty after sanitization
+  if (!sanitized || sanitized === "." || sanitized === "..") {
+    sanitized = "upload_" + Date.now();
+  }
+  return sanitized;
+}
+
+// Sensitive paths denied even in full-filesystem mode
+const DENIED_PATHS = ["/etc/shadow", "/etc/gshadow"];
+const DENIED_PREFIXES = ["/proc", "/sys", "/dev"];
+
 function safePath(requestedPath) {
+  const resolved = path.resolve(
+    config.allowFullFilesystem ? "/" : config.sharedDir,
+    requestedPath || (config.allowFullFilesystem ? "/" : "")
+  );
+
+  if (resolved.includes("\0")) {
+    throw new Error("Invalid path");
+  }
+
   if (config.allowFullFilesystem) {
-    const resolved = path.resolve(requestedPath || "/");
-    if (resolved.includes("\0")) {
-      throw new Error("Invalid path");
+    // Deny access to sensitive system files even in full-fs mode
+    for (const denied of DENIED_PATHS) {
+      if (resolved === denied) throw new Error("Access denied");
+    }
+    for (const prefix of DENIED_PREFIXES) {
+      if (resolved.startsWith(prefix + "/") || resolved === prefix) {
+        throw new Error("Access denied");
+      }
     }
     return resolved;
   }
-  const resolved = path.resolve(config.sharedDir, requestedPath || "");
+
   if (!resolved.startsWith(config.sharedDir)) {
     throw new Error("Access denied");
   }
@@ -252,7 +359,7 @@ async function getMountedDrives() {
       }
     }
   } catch (err) {
-    console.error("Error getting drives:", err);
+    console.error("Error getting drives:", err.message);
   }
 
   const defaultPaths = [
@@ -321,13 +428,13 @@ async function getFolderTree(dirPath) {
 
     folders.sort((a, b) => a.name.localeCompare(b.name));
   } catch (err) {
-    console.error("Error getting folder tree:", err);
+    console.error("Error getting folder tree:", err.message);
   }
 
   return folders;
 }
 
-// Multer storage configuration
+// Multer storage configuration with filename sanitization
 const storage = multer.diskStorage({
   destination: (req, _file, cb) => {
     try {
@@ -338,15 +445,15 @@ const storage = multer.diskStorage({
     }
   },
   filename: (_req, file, cb) => {
-    cb(null, file.originalname);
+    cb(null, sanitizeFilename(file.originalname));
   },
 });
 const upload = multer({ storage, limits: { fileSize: 500 * 1024 * 1024 } });
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: "100kb" }));
+app.use(express.urlencoded({ extended: true, limit: "100kb" }));
 
-// Auth middleware — reads token from httpOnly cookie
+// Auth middleware
 function requireAuth(req, res, next) {
   if (!isConfigured()) {
     return res.status(503).json({ error: "Not configured", needsSetup: true });
@@ -360,7 +467,6 @@ function requireAuth(req, res, next) {
 
 // --- Unauthenticated endpoints ---
 
-// Status endpoint - tells frontend if setup is needed
 app.get("/api/status", (_req, res) => {
   res.json({ needsSetup: !isConfigured() });
 });
@@ -372,16 +478,13 @@ app.post("/api/setup", rateLimit, (req, res) => {
   }
 
   const { username, password, sharedDir, allowFullFilesystem } = req.body;
-  if (!password || password.length < 1) {
-    return res.status(400).json({ error: "Password is required" });
+  if (!password || password.length < MIN_PASSWORD_LENGTH) {
+    return res.status(400).json({ error: `Password must be at least ${MIN_PASSWORD_LENGTH} characters` });
   }
 
-  const salt = crypto.randomBytes(16).toString("hex");
-  const hash = crypto.createHash("sha256").update(password + salt).digest("hex");
-
+  config.passwordHash = bcrypt.hashSync(password, BCRYPT_ROUNDS);
+  config.salt = "bcrypt";
   config.username = (username || "admin").trim().toLowerCase();
-  config.passwordHash = hash;
-  config.salt = salt;
   if (sharedDir) config.sharedDir = sharedDir;
   if (allowFullFilesystem !== undefined) config.allowFullFilesystem = !!allowFullFilesystem;
 
@@ -390,40 +493,39 @@ app.post("/api/setup", rateLimit, (req, res) => {
     if (!fsSync.existsSync(config.sharedDir)) {
       fsSync.mkdirSync(config.sharedDir, { recursive: true });
     }
-  } catch (err) {
-    return res.status(400).json({ error: "Cannot create shared directory: " + err.message });
+  } catch {
+    return res.status(400).json({ error: "Cannot create shared directory" });
   }
 
   saveConfig(config);
   const token = generateAuthToken(true);
-  setAuthCookie(res, token, true);
+  setAuthCookie(res, req, token, true);
 
   res.json({ ok: true });
 });
 
-// Auth endpoint - verify username + password, set cookie
+// Auth endpoint
 app.post("/api/auth", rateLimit, (req, res) => {
   if (!isConfigured()) {
     return res.status(503).json({ error: "Not configured", needsSetup: true });
   }
   const { username, password, rememberMe } = req.body;
 
-  // Validate username
   const expectedUser = (config.username || "admin").toLowerCase();
   if ((username || "").trim().toLowerCase() !== expectedUser) {
     return res.status(401).json({ error: "Invalid credentials" });
   }
 
   if (verifyPassword(password)) {
+    upgradePasswordHash(password);
     const token = generateAuthToken(!!rememberMe);
-    setAuthCookie(res, token, !!rememberMe);
+    setAuthCookie(res, req, token, !!rememberMe);
     res.json({ ok: true });
   } else {
     res.status(401).json({ error: "Invalid credentials" });
   }
 });
 
-// API: Get current settings (non-sensitive)
 app.get("/api/settings", requireAuth, (_req, res) => {
   res.json({
     username: config.username || "admin",
@@ -432,32 +534,25 @@ app.get("/api/settings", requireAuth, (_req, res) => {
   });
 });
 
-// API: Update settings
 app.post("/api/settings", requireAuth, (req, res) => {
   const { currentPassword, newPassword, newUsername, sharedDir, allowFullFilesystem } = req.body;
 
-  // Require current password for any settings change
   if (!currentPassword || !verifyPassword(currentPassword)) {
     return res.status(401).json({ error: "Current password is incorrect" });
   }
 
-  // Update username if provided
   if (newUsername !== undefined && newUsername.trim()) {
     config.username = newUsername.trim().toLowerCase();
   }
 
-  // Update password if provided
   if (newPassword) {
-    if (newPassword.length < 1) {
-      return res.status(400).json({ error: "Password cannot be empty" });
+    if (newPassword.length < MIN_PASSWORD_LENGTH) {
+      return res.status(400).json({ error: `Password must be at least ${MIN_PASSWORD_LENGTH} characters` });
     }
-    const salt = crypto.randomBytes(16).toString("hex");
-    const hash = crypto.createHash("sha256").update(newPassword + salt).digest("hex");
-    config.passwordHash = hash;
-    config.salt = salt;
+    config.passwordHash = bcrypt.hashSync(newPassword, BCRYPT_ROUNDS);
+    config.salt = "bcrypt";
   }
 
-  // Update shared directory if provided
   if (sharedDir !== undefined && sharedDir !== config.sharedDir) {
     const resolved = path.resolve(sharedDir);
     try {
@@ -465,27 +560,28 @@ app.post("/api/settings", requireAuth, (req, res) => {
         fsSync.mkdirSync(resolved, { recursive: true });
       }
       config.sharedDir = resolved;
-    } catch (err) {
-      return res.status(400).json({ error: "Cannot access directory: " + err.message });
+    } catch {
+      return res.status(400).json({ error: "Cannot access directory" });
     }
   }
 
-  // Update filesystem access toggle
   if (allowFullFilesystem !== undefined) {
     config.allowFullFilesystem = !!allowFullFilesystem;
   }
 
   saveConfig(config);
 
-  // Re-issue cookie with new credentials
   const token = generateAuthToken(true);
-  setAuthCookie(res, token, true);
+  setAuthCookie(res, req, token, true);
 
   res.json({ ok: true });
 });
 
-// Serve static frontend
-app.use("/static", express.static(path.join(__dirname, "public")));
+// Serve static frontend with caching
+app.use("/static", express.static(path.join(__dirname, "public"), { maxAge: "1d", etag: true }));
+
+// File extensions that should never be served with their natural MIME type
+const UNSAFE_EXTENSIONS = new Set([".html", ".htm", ".svg", ".xml", ".xhtml", ".svgz"]);
 
 // Serve files from any path for previews (auth via cookie)
 app.get("/files/{*filepath}", (req, res) => {
@@ -503,9 +599,16 @@ app.get("/files/{*filepath}", (req, res) => {
       filePath = "/" + filePath;
     }
     const resolved = safePath(filePath);
+    const ext = path.extname(resolved).toLowerCase();
+
+    // Serve potentially dangerous file types as plain text
+    if (UNSAFE_EXTENSIONS.has(ext)) {
+      res.setHeader("Content-Type", "text/plain; charset=utf-8");
+      res.setHeader("X-Content-Type-Options", "nosniff");
+    }
     res.sendFile(resolved);
-  } catch (err) {
-    res.status(400).json({ error: err.message });
+  } catch {
+    res.status(400).json({ error: "File not accessible" });
   }
 });
 
@@ -516,29 +619,27 @@ app.get("/api/info", requireAuth, async (req, res) => {
     const diskPath = req.query.path ? safePath(req.query.path) : config.sharedDir;
     const disk = await getDiskUsage(diskPath);
     res.json({ machine, disk });
-  } catch (err) {
-    res.status(400).json({ error: err.message });
+  } catch {
+    res.status(400).json({ error: "Failed to get system info" });
   }
 });
 
-// API: Get mounted drives
-app.get("/api/drives", requireAuth, async (req, res) => {
+app.get("/api/drives", requireAuth, async (_req, res) => {
   try {
     const drives = await getMountedDrives();
     res.json(drives);
-  } catch (err) {
-    res.status(400).json({ error: err.message });
+  } catch {
+    res.status(400).json({ error: "Failed to list drives" });
   }
 });
 
-// API: Get folder tree for a directory
 app.get("/api/tree", requireAuth, async (req, res) => {
   try {
     const dirPath = req.query.path || "/";
     const folders = await getFolderTree(dirPath);
     res.json(folders);
-  } catch (err) {
-    res.status(400).json({ error: err.message });
+  } catch {
+    res.status(400).json({ error: "Failed to load folder tree" });
   }
 });
 
@@ -574,8 +675,8 @@ app.get("/api/list", requireAuth, async (req, res) => {
       if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
       return a.name.localeCompare(b.name);
     }));
-  } catch (err) {
-    res.status(400).json({ error: err.message });
+  } catch {
+    res.status(400).json({ error: "Failed to list directory" });
   }
 });
 
@@ -584,11 +685,13 @@ app.post("/api/upload", requireAuth, upload.array("files", 50), (req, res) => {
   res.json({ uploaded: req.files.map((f) => f.originalname) });
 });
 
-// API: Create folder
+// API: Create folder — validates name to prevent path traversal
 app.post("/api/mkdir", requireAuth, async (req, res) => {
   try {
+    validateName(req.body.name);
     const basePath = safePath(req.body.path || config.sharedDir);
     const dir = path.join(basePath, req.body.name);
+    safePath(dir); // re-validate the final path
     await fs.mkdir(dir, { recursive: true });
     res.json({ ok: true });
   } catch (err) {
@@ -596,12 +699,13 @@ app.post("/api/mkdir", requireAuth, async (req, res) => {
   }
 });
 
-// API: Create empty file
+// API: Create empty file — validates name to prevent path traversal
 app.post("/api/touch", requireAuth, async (req, res) => {
   try {
+    validateName(req.body.name);
     const basePath = safePath(req.body.path || config.sharedDir);
     const filePath = path.join(basePath, req.body.name);
-    // Don't overwrite existing files
+    safePath(filePath); // re-validate the final path
     try {
       await fs.access(filePath);
       return res.status(400).json({ error: "File already exists" });
@@ -615,11 +719,13 @@ app.post("/api/touch", requireAuth, async (req, res) => {
   }
 });
 
-// API: Rename file/folder
+// API: Rename file/folder — validates newName to prevent path traversal
 app.post("/api/rename", requireAuth, async (req, res) => {
   try {
+    validateName(req.body.newName);
     const oldPath = safePath(req.body.oldPath);
     const newPath = path.join(path.dirname(oldPath), req.body.newName);
+    safePath(newPath); // re-validate the final path
     await fs.rename(oldPath, newPath);
     res.json({ ok: true, newPath });
   } catch (err) {
@@ -644,8 +750,8 @@ app.post("/api/copy", requireAuth, async (req, res) => {
 
     await fs.cp(sourcePath, destPath, { recursive: true });
     res.json({ ok: true });
-  } catch (err) {
-    res.status(400).json({ error: err.message });
+  } catch {
+    res.status(400).json({ error: "Copy failed" });
   }
 });
 
@@ -666,8 +772,8 @@ app.post("/api/move", requireAuth, async (req, res) => {
 
     await fs.rename(sourcePath, destPath);
     res.json({ ok: true });
-  } catch (err) {
-    res.status(400).json({ error: err.message });
+  } catch {
+    res.status(400).json({ error: "Move failed" });
   }
 });
 
@@ -682,8 +788,8 @@ app.delete("/api/delete", requireAuth, async (req, res) => {
       await fs.unlink(target);
     }
     res.json({ ok: true });
-  } catch (err) {
-    res.status(400).json({ error: err.message });
+  } catch {
+    res.status(400).json({ error: "Delete failed" });
   }
 });
 
@@ -724,13 +830,20 @@ const MIME_TYPES = {
   '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
 };
 
-// API: Logout — clear auth cookie
+// Sanitize filename for Content-Disposition header
+function safeContentDisposition(filename, type = "attachment") {
+  const ascii = filename.replace(/[^\x20-\x7E]/g, "_").replace(/"/g, "'");
+  const encoded = encodeURIComponent(filename);
+  return `${type}; filename="${ascii}"; filename*=UTF-8''${encoded}`;
+}
+
+// API: Logout
 app.post("/api/logout", (_req, res) => {
   clearAuthCookie(res);
   res.json({ ok: true });
 });
 
-// API: Get file/folder properties
+// API: Get file/folder properties with depth/count limits
 app.get("/api/properties", requireAuth, async (req, res) => {
   try {
     const target = safePath(req.query.path);
@@ -746,19 +859,24 @@ app.get("/api/properties", requireAuth, async (req, res) => {
       permissions: '0' + (stat.mode & 0o777).toString(8),
     };
 
-    // For directories, calculate recursive size
     if (stat.isDirectory()) {
       let totalSize = 0;
       let fileCount = 0;
       let folderCount = 0;
-      async function walk(dir) {
+      let truncated = false;
+      const MAX_FILES = 100000;
+      const MAX_DEPTH = 50;
+
+      async function walk(dir, depth) {
+        if (truncated || depth > MAX_DEPTH) { truncated = true; return; }
         try {
           const entries = await fs.readdir(dir, { withFileTypes: true });
           for (const entry of entries) {
+            if (fileCount + folderCount > MAX_FILES) { truncated = true; return; }
             const full = path.join(dir, entry.name);
             if (entry.isDirectory()) {
               folderCount++;
-              await walk(full);
+              await walk(full, depth + 1);
             } else {
               fileCount++;
               try {
@@ -769,19 +887,20 @@ app.get("/api/properties", requireAuth, async (req, res) => {
           }
         } catch {}
       }
-      await walk(target);
+      await walk(target, 0);
       props.totalSize = totalSize;
       props.fileCount = fileCount;
       props.folderCount = folderCount;
+      if (truncated) props.truncated = true;
     }
 
     res.json(props);
-  } catch (err) {
-    res.status(400).json({ error: err.message });
+  } catch {
+    res.status(400).json({ error: "Failed to get properties" });
   }
 });
 
-// API: Download file or folder as ZIP (auth via cookie)
+// API: Download file or folder as ZIP
 app.get("/api/download", async (req, res) => {
   const cookies = parseCookies(req.headers.cookie);
   if (!validateAuthToken(cookies.auth)) {
@@ -793,13 +912,12 @@ app.get("/api/download", async (req, res) => {
     const fileName = path.basename(file);
 
     if (stat.isDirectory()) {
-      // Stream folder as ZIP
       res.setHeader('Content-Type', 'application/zip');
-      res.setHeader('Content-Disposition', `attachment; filename="${fileName}.zip"`);
+      res.setHeader('Content-Disposition', safeContentDisposition(fileName + ".zip"));
       res.setHeader('X-Content-Type-Options', 'nosniff');
 
       const archive = archiver('zip', { zlib: { level: 5 } });
-      archive.on('error', (err) => { throw err; });
+      archive.on('error', () => { if (!res.headersSent) res.status(500).end(); });
       archive.pipe(res);
       archive.directory(file, fileName);
       await archive.finalize();
@@ -808,13 +926,13 @@ app.get("/api/download", async (req, res) => {
       const mimeType = MIME_TYPES[ext] || 'application/octet-stream';
 
       res.setHeader('Content-Type', mimeType);
-      res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+      res.setHeader('Content-Disposition', safeContentDisposition(fileName));
       res.setHeader('X-Content-Type-Options', 'nosniff');
 
       res.download(file, fileName);
     }
-  } catch (err) {
-    res.status(400).json({ error: err.message });
+  } catch {
+    if (!res.headersSent) res.status(400).json({ error: "Download failed" });
   }
 });
 
@@ -823,9 +941,24 @@ app.get("/{*splat}", (_req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
-app.listen(config.port, "0.0.0.0", () => {
-  console.log(`File Explorer running at http://0.0.0.0:${config.port}`);
+// Ensure shared directory exists on startup
+try {
+  if (!fsSync.existsSync(config.sharedDir)) {
+    fsSync.mkdirSync(config.sharedDir, { recursive: true });
+    console.log(`Created shared directory: ${config.sharedDir}`);
+  }
+} catch (err) {
+  console.error(`WARNING: Cannot create shared directory ${config.sharedDir}: ${err.message}`);
+}
+
+// --- Start server (plain HTTP) ---
+const startLog = () => {
   console.log(`Shared directory: ${config.sharedDir}`);
   console.log(`Full filesystem access: ${config.allowFullFilesystem ? "enabled" : "disabled"}`);
   console.log(`Configured: ${isConfigured() ? "yes" : "no (setup required)"}`);
+};
+
+app.listen(config.port, "0.0.0.0", () => {
+  console.log(`File Explorer running at http://0.0.0.0:${config.port}`);
+  startLog();
 });

@@ -1,0 +1,11 @@
+node_modules
+.git
+data
+*.md
+.env
+.env.*
+screenshots
+.dockerignore
+Dockerfile
+docker-compose.yml
+Caddyfile.standalone
