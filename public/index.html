@@ -4,7 +4,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>File Explorer</title>
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%233b82f6'%3E%3Cpath d='M10 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2z'/%3E%3C/svg%3E">
+<link rel="icon" type="image/svg+xml" href="/icon-192.svg">
+<link rel="apple-touch-icon" href="/icon-192.svg">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0a0a0a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Files">
 <style>
   :root {
     --bg: #0a0a0a;
@@ -6479,7 +6485,12 @@ function initTouchHandlers() {
     longPressTimer = setTimeout(() => {
       longPressFired = true;
       haptic(50);
-      toggleSelect(index, {});
+      // Long press shows context menu (bottom sheet) and selects the item
+      if (!selectedPaths.has(filteredItems[index]?.path)) {
+        clearSelection();
+        toggleSelect(index, {});
+      }
+      showContext({ preventDefault: () => {} }, index);
     }, 500);
   }, { passive: true });
 
@@ -6503,7 +6514,7 @@ function initTouchHandlers() {
   }, { passive: true });
 }
 
-// Override handleClick for mobile selection mode
+// Override handleClick for mobile: single tap opens, long press shows menu
 const _originalHandleClick = handleClick;
 handleClick = function(event, index) {
   if (isMobile() && longPressFired) {
@@ -6514,11 +6525,17 @@ handleClick = function(event, index) {
     touchMoved = false;
     return;
   }
+  // Multi-select mode: taps toggle selection
   if (isMobile() && selectedPaths.size > 0) {
     event.preventDefault();
     event.stopPropagation();
     haptic(20);
     toggleSelect(index, {});
+    return;
+  }
+  // No selection: single tap opens the item directly
+  if (isMobile()) {
+    openItem(index);
     return;
   }
   _originalHandleClick(event, index);
@@ -6914,6 +6931,11 @@ initApp = async function() {
     }
   }
 })();
+
+// Register service worker for PWA
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("/sw.js").catch(() => {});
+}
 </script>
 </body>
 </html>

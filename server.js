@@ -580,6 +580,13 @@ app.post("/api/settings", requireAuth, (req, res) => {
 // Serve static frontend with caching
 app.use("/static", express.static(path.join(__dirname, "public"), { maxAge: "1d", etag: true }));
 
+// PWA files must be served from root scope
+app.get("/sw.js", (_req, res) => res.sendFile(path.join(__dirname, "public", "sw.js")));
+app.get("/manifest.json", (_req, res) => res.sendFile(path.join(__dirname, "public", "manifest.json")));
+app.get("/icon-192.svg", (_req, res) => res.type("image/svg+xml").sendFile(path.join(__dirname, "public", "icon-192.svg")));
+app.get("/icon-512.svg", (_req, res) => res.type("image/svg+xml").sendFile(path.join(__dirname, "public", "icon-512.svg")));
+app.get("/icon-maskable.svg", (_req, res) => res.type("image/svg+xml").sendFile(path.join(__dirname, "public", "icon-maskable.svg")));
+
 // File extensions that should never be served with their natural MIME type
 const UNSAFE_EXTENSIONS = new Set([".html", ".htm", ".svg", ".xml", ".xhtml", ".svgz"]);
 
