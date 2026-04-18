@@ -281,6 +281,27 @@ function sanitizeFilename(name) {
   return sanitized;
 }
 
+// Sanitize a relative path from a folder upload. Returns { dir, base } where
+// dir is a forward-slash relative directory (possibly empty) and base is the
+// sanitized filename. Throws on traversal attempts.
+function sanitizeRelativePath(name) {
+  if (!name || typeof name !== "string") {
+    return { dir: "", base: sanitizeFilename(name || "") };
+  }
+  if (name.includes("\0")) throw new Error("Invalid path");
+  // Normalize separators and strip any leading slashes/dots
+  const parts = name.replace(/\\/g, "/").split("/").filter(Boolean);
+  const segments = [];
+  for (const part of parts) {
+    if (part === "." || part === "..") throw new Error("Invalid path");
+    if (part.length > 255) throw new Error("Name too long");
+    segments.push(part);
+  }
+  if (!segments.length) return { dir: "", base: "upload_" + Date.now() };
+  const base = sanitizeFilename(segments.pop());
+  return { dir: segments.join("/"), base };
+}
+
 // Sensitive paths denied even in full-filesystem mode
 const DENIED_PATHS = ["/etc/shadow", "/etc/gshadow"];
 const DENIED_PREFIXES = ["/proc", "/sys", "/dev"];
@@ -436,19 +457,33 @@ async function getFolderTree(dirPath) {
 
 // Multer storage configuration with filename sanitization
 const storage = multer.diskStorage({
-  destination: (req, _file, cb) => {
+  destination: (req, file, cb) => {
     try {
-      const dest = safePath(req.query.path || "");
-      cb(null, dest);
+      const basePath = safePath(req.query.path || "");
+      const { dir } = sanitizeRelativePath(file.originalname);
+      if (!dir) return cb(null, basePath);
+      const dest = safePath(path.join(basePath, dir));
+      fs.mkdir(dest, { recursive: true })
+        .then(() => cb(null, dest))
+        .catch(() => cb(new Error("Failed to create upload directory")));
     } catch {
       cb(new Error("Invalid path"));
     }
   },
   filename: (_req, file, cb) => {
-    cb(null, sanitizeFilename(file.originalname));
+    try {
+      const { base } = sanitizeRelativePath(file.originalname);
+      cb(null, base);
+    } catch {
+      cb(new Error("Invalid filename"));
+    }
   },
 });
-const upload = multer({ storage, limits: { fileSize: 500 * 1024 * 1024 } });
+const upload = multer({
+  storage,
+  preservePath: true,
+  limits: { fileSize: 500 * 1024 * 1024, files: 2000 },
+});
 
 app.use(express.json({ limit: "100kb" }));
 app.use(express.urlencoded({ extended: true, limit: "100kb" }));
@@ -688,7 +723,7 @@ app.get("/api/list", requireAuth, async (req, res) => {
 });
 
 // API: Upload files
-app.post("/api/upload", requireAuth, upload.array("files", 50), (req, res) => {
+app.post("/api/upload", requireAuth, upload.array("files", 2000), (req, res) => {
   res.json({ uploaded: req.files.map((f) => f.originalname) });
 });
 

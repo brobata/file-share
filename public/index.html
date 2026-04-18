@@ -2531,7 +2531,9 @@
     <button class="btn" onclick="toggleSystemBar()">&#9432; Info</button>
     <button class="btn" onclick="createFolder()">+ Folder</button>
     <button class="btn btn-primary" onclick="fileInput.click()">Upload</button>
+    <button class="btn" onclick="folderUploadInput.click()" title="Upload folder">&#128193; Folder</button>
     <input type="file" id="fileInput" multiple hidden onchange="uploadFiles(this.files)">
+    <input type="file" id="folderUploadInput" webkitdirectory multiple hidden onchange="uploadFiles(this.files)">
     <button class="mobile-more-btn" onclick="toggleMobileMenu()" title="More actions">
       <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
     </button>
@@ -2542,6 +2544,10 @@
   <button onclick="fileInput.click(); closeMobileMenu()">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
     Upload Files
+  </button>
+  <button onclick="folderUploadInput.click(); closeMobileMenu()">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><polyline points="12 11 12 17"/><polyline points="9 14 15 14"/></svg>
+    Upload Folder
   </button>
   <button onclick="createFolder(); closeMobileMenu()">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>
@@ -2592,6 +2598,10 @@
   <div class="fab-menu-item" onclick="closeFab(); fileInput.click();">
     <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg></button>
     <span>Upload Files</span>
+  </div>
+  <div class="fab-menu-item" onclick="closeFab(); folderUploadInput.click();">
+    <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><polyline points="12 11 12 17"/><polyline points="9 14 15 14"/></svg></button>
+    <span>Upload Folder</span>
   </div>
   <div class="fab-menu-item" onclick="closeFab(); createFolder();">
     <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg></button>
@@ -5347,23 +5357,79 @@ document.querySelectorAll(".modal-overlay").forEach(el => {
 // Drag & drop
 function handleDrop(event) {
   event.preventDefault();
+  event.stopPropagation();
   document.getElementById("dropzone").classList.remove("active");
-  const files = event.dataTransfer.files;
-  if (files.length) uploadFiles(files);
+  handleDataTransfer(event.dataTransfer);
 }
 
-async function uploadFiles(files) {
-  if (!files.length) return;
+// Recursively walk a FileSystemEntry tree into a flat [{file, relPath}] list.
+function readEntry(entry, pathPrefix = "") {
+  return new Promise((resolve) => {
+    if (entry.isFile) {
+      entry.file(
+        (f) => resolve([{ file: f, relPath: pathPrefix + entry.name }]),
+        () => resolve([])
+      );
+    } else if (entry.isDirectory) {
+      const reader = entry.createReader();
+      const all = [];
+      const readBatch = () => {
+        reader.readEntries(async (entries) => {
+          if (!entries.length) return resolve(all);
+          const results = await Promise.all(
+            entries.map((e) => readEntry(e, pathPrefix + entry.name + "/"))
+          );
+          for (const r of results) all.push(...r);
+          readBatch();
+        }, () => resolve(all));
+      };
+      readBatch();
+    } else {
+      resolve([]);
+    }
+  });
+}
+
+async function handleDataTransfer(dt) {
+  const items = dt.items;
+  const canUseEntries = items && items.length && typeof items[0].webkitGetAsEntry === "function";
+  if (!canUseEntries) {
+    if (dt.files && dt.files.length) uploadFiles(dt.files);
+    return;
+  }
+  const entries = [];
+  for (const item of items) {
+    const entry = item.webkitGetAsEntry();
+    if (entry) entries.push(entry);
+  }
+  // If webkitGetAsEntry returned nothing for any items, the dataTransfer was
+  // already consumed (e.g. by a duplicate handler). Bail rather than falling
+  // back to flat dt.files, which would upload everything stripped of folders.
+  if (!entries.length) return;
+  const nested = await Promise.all(entries.map((e) => readEntry(e)));
+  const collected = nested.flat();
+  if (!collected.length) return;
+  uploadFiles(collected);
+}
+
+// Accepts either a FileList/File[] or an array of {file, relPath} objects.
+async function uploadFiles(items) {
+  const list = Array.from(items);
+  if (!list.length) return;
   const bar = document.getElementById("uploadBar");
   const label = document.getElementById("uploadLabel");
   const progress = document.getElementById("uploadProgress");
 
   bar.classList.add("visible");
-  label.textContent = `Uploading ${files.length} file(s)...`;
+  label.textContent = `Uploading ${list.length} file(s)...`;
   progress.style.width = "0%";
 
   const formData = new FormData();
-  for (const f of files) formData.append("files", f);
+  for (const item of list) {
+    const file = item.file || item;
+    const relPath = item.relPath || file.webkitRelativePath || file.name;
+    formData.append("files", file, relPath);
+  }
 
   try {
     const xhr = new XMLHttpRequest();
@@ -5371,14 +5437,19 @@ async function uploadFiles(files) {
       if (e.lengthComputable) {
         const pct = Math.round((e.loaded / e.total) * 100);
         progress.style.width = pct + "%";
-        label.textContent = `Uploading ${files.length} file(s)... ${pct}%`;
+        label.textContent = `Uploading ${list.length} file(s)... ${pct}%`;
       }
     };
     xhr.onload = () => {
-      toast(`Uploaded ${files.length} file(s)`, "success");
+      if (xhr.status >= 200 && xhr.status < 300) {
+        toast(`Uploaded ${list.length} file(s)`, "success");
+      } else {
+        toast("Upload failed", "error");
+      }
       bar.classList.remove("visible");
       navigate(currentPath);
       document.getElementById("fileInput").value = "";
+      document.getElementById("folderUploadInput").value = "";
     };
     xhr.onerror = () => {
       toast("Upload failed", "error");
@@ -5404,10 +5475,10 @@ document.addEventListener("dragleave", e => {
 document.addEventListener("drop", e => {
   e.preventDefault();
   document.getElementById("dropzone").classList.remove("active");
-  if (e.target.closest(".dropzone") || e.target.closest(".file-grid")) {
-    const files = e.dataTransfer.files;
-    if (files.length) uploadFiles(files);
-  }
+  // Only handle OS file/folder drops — ignore internal app drags
+  const types = e.dataTransfer && e.dataTransfer.types;
+  if (!types || !Array.from(types).includes("Files")) return;
+  handleDataTransfer(e.dataTransfer);
 });
 
 // ==================== UNDO/REDO ====================
