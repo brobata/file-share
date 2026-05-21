@@ -1,12 +1,17 @@
 {
+  "id": "/?source=pwa",
   "name": "File Explorer",
   "short_name": "Files",
   "description": "Browse, upload, and manage files on your local network",
-  "start_url": "/",
+  "start_url": "/?source=pwa",
+  "scope": "/",
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
   "background_color": "#0a0a0a",
   "theme_color": "#0a0a0a",
   "orientation": "any",
+  "categories": ["productivity", "utilities"],
+  "prefer_related_applications": false,
   "icons": [
     {
       "src": "/icon-192.svg",

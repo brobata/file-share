@@ -4,3 +4,4 @@ certs/
 .DS_Store
 *.log
 public/*.zip
+.playwright-mcp/

@@ -615,6 +615,9 @@ app.post("/api/settings", requireAuth, (req, res) => {
 // Serve static frontend with caching
 app.use("/static", express.static(path.join(__dirname, "public"), { maxAge: "1d", etag: true }));
 
+// Vendored third-party assets (CodeMirror) — long cache, public scope so script tags can reference /vendor/...
+app.use("/vendor", express.static(path.join(__dirname, "public", "vendor"), { maxAge: "30d", etag: true, immutable: true }));
+
 // PWA files must be served from root scope
 app.get("/sw.js", (_req, res) => res.sendFile(path.join(__dirname, "public", "sw.js")));
 app.get("/manifest.json", (_req, res) => res.sendFile(path.join(__dirname, "public", "manifest.json")));
@@ -756,6 +759,20 @@ app.post("/api/touch", requireAuth, async (req, res) => {
     }
     await fs.writeFile(filePath, "");
     res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// API: Save text content to an existing file
+app.post("/api/save", requireAuth, express.json({ limit: "5mb" }), async (req, res) => {
+  try {
+    const filePath = safePath(req.body.path);
+    const content = typeof req.body.content === "string" ? req.body.content : "";
+    const stat = await fs.stat(filePath);
+    if (stat.isDirectory()) throw new Error("Cannot save: path is a directory");
+    await fs.writeFile(filePath, content, "utf8");
+    res.json({ ok: true, size: Buffer.byteLength(content, "utf8") });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

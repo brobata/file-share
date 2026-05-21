@@ -1,6 +1,6 @@
 // Service worker for PWA install support
 // Network-first strategy — always fetch fresh, fall back to cache for offline shell
-const CACHE = "file-explorer-v1";
+const CACHE = "file-explorer-v2";
 const SHELL = ["/", "/manifest.json", "/icon-192.svg", "/icon-512.svg"];
 
 self.addEventListener("install", (e) => {

@@ -11,6 +11,9 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Files">
+<link rel="stylesheet" href="/vendor/codemirror/codemirror.min.css">
+<link rel="stylesheet" href="/vendor/codemirror/material-darker.min.css">
+<link rel="stylesheet" href="/vendor/codemirror/eclipse.min.css">
 <style>
   :root {
     --bg: #0a0a0a;
@@ -706,6 +709,9 @@
   .btn-danger { color: var(--danger); }
   .btn-danger:hover { background: rgba(239,68,68,0.1); }
   .btn-sm { padding: 4px 8px; font-size: 12px; }
+  .install-btn { color: var(--accent); border-color: var(--accent); }
+  .install-btn:hover { background: rgba(59,130,246,0.12); }
+  .install-btn svg { width: 14px; height: 14px; }
 
   /* Drop zone */
   .dropzone {
@@ -823,21 +829,32 @@
     transform: scale(1);
   }
 
-  /* Selection toolbar */
+  /* Selection toolbar — floats above content so it never shifts the file grid */
   .selection-bar {
-    display: none;
+    display: flex;
     align-items: center;
     gap: 16px;
     padding: 12px 24px;
     background: linear-gradient(135deg, var(--accent) 0%, #1d4ed8 100%);
     color: #fff;
     font-size: 14px;
-    box-shadow: 0 4px 20px rgba(59, 130, 246, 0.3);
-    position: sticky;
-    top: 57px;
-    z-index: 99;
+    box-shadow: 0 6px 24px rgba(59, 130, 246, 0.35);
+    position: fixed;
+    left: 12px;
+    right: 12px;
+    top: 12px;
+    border-radius: 12px;
+    z-index: 250;
+    opacity: 0;
+    transform: translateY(-12px);
+    pointer-events: none;
+    transition: opacity 0.18s ease, transform 0.18s ease;
   }
-  .selection-bar.visible { display: flex; }
+  .selection-bar.visible {
+    opacity: 1;
+    transform: translateY(0);
+    pointer-events: auto;
+  }
   .selection-bar .count {
     font-weight: 700;
     font-size: 15px;
@@ -1386,6 +1403,75 @@
   .media-overlay .media-download:hover { background: rgba(255,255,255,0.2); }
   .media-overlay .media-download svg { width: 18px; height: 18px; }
 
+  /* Edit/Save/Cancel buttons for text preview — z-index above CodeMirror */
+  .media-overlay .media-edit,
+  .media-overlay .media-cancel-edit {
+    position: absolute;
+    top: 20px;
+    width: 40px;
+    height: 40px;
+    border: none;
+    background: rgba(255,255,255,0.1);
+    color: #fff;
+    border-radius: 50%;
+    cursor: pointer;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+    z-index: 10;
+  }
+  .media-overlay .media-edit { right: 124px; }
+  .media-overlay .media-cancel-edit { right: 72px; }
+  .media-overlay .media-edit:hover,
+  .media-overlay .media-cancel-edit:hover { background: rgba(255,255,255,0.2); }
+  .media-overlay .media-edit svg,
+  .media-overlay .media-cancel-edit svg { width: 18px; height: 18px; }
+  .media-overlay .media-save {
+    position: absolute;
+    top: 20px;
+    right: 128px;
+    height: 40px;
+    padding: 0 16px;
+    border: none;
+    background: var(--accent);
+    color: #fff;
+    border-radius: 20px;
+    cursor: pointer;
+    display: none;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    transition: all 0.2s;
+    z-index: 10;
+  }
+  .media-overlay .media-save:hover { background: #2563eb; }
+  .media-overlay .media-save:disabled { opacity: 0.6; cursor: default; }
+  .media-overlay .media-save svg { width: 16px; height: 16px; }
+  .media-overlay .media-save.saving .media-save-label::after { content: "ing\2026"; }
+
+  /* CodeMirror sizing inside the overlay — leaves room at top for action buttons */
+  .text-preview .CodeMirror {
+    width: 90vw;
+    max-width: 900px;
+    height: calc(80vh - 60px);
+    border-radius: 8px;
+    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', Consolas, 'Courier New', monospace;
+    font-size: 13px;
+    line-height: 1.6;
+  }
+  .text-preview.editing {
+    background: transparent;
+    overflow: visible;
+    width: auto;
+    max-width: none;
+    max-height: none;
+    margin-top: 60px;
+  }
+  .light-theme .media-overlay .media-edit,
+  .light-theme .media-overlay .media-cancel-edit { background: rgba(255,255,255,0.15); }
+
   /* Theme toggle */
   .theme-toggle {
     width: 36px;
@@ -1432,10 +1518,12 @@
     .results-count { order: 3; margin-left: 0; }
     .dropzone { margin: 12px; padding: 24px; }
     .selection-bar {
-      padding: 10px 16px;
+      padding: 10px 14px;
       gap: 10px;
       flex-wrap: wrap;
-      top: 53px;
+      left: 8px;
+      right: 8px;
+      top: 8px;
     }
     .selection-bar .count { font-size: 13px; }
     .selection-bar .sel-btn { padding: 6px 12px; font-size: 12px; }
@@ -2421,7 +2509,6 @@
     .fab { bottom: 76px; }
     .fab-menu { bottom: 142px; }
     .toast-container { bottom: 70px; }
-    .selection-bar { bottom: 56px; }
     /* Hide desktop context menu on mobile */
     .context-menu { display: none !important; }
   }
@@ -2525,6 +2612,10 @@
       <svg id="themeIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
       </svg>
+    </button>
+    <button class="btn install-btn" id="installBtn" onclick="installApp()" title="Install as app" style="display:none">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      <span class="install-text">Install</span>
     </button>
     <button class="btn" onclick="logout()" title="Log out">&#x2190;<span class="logout-text"> Logout</span></button>
     <button class="btn" onclick="openSettings()">&#9881; Settings</button>
@@ -2943,8 +3034,18 @@
   <button class="media-close" onclick="closeMedia()">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
   </button>
-  <button class="media-download" id="mediaDownload" onclick="downloadCurrentPreview()">
+  <button class="media-download" id="mediaDownload" onclick="downloadCurrentPreview()" title="Download">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+  </button>
+  <button class="media-edit" id="mediaEdit" onclick="toggleEditMode()" title="Edit (Ctrl+E)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+  </button>
+  <button class="media-save" id="mediaSave" onclick="saveEdit()" title="Save (Ctrl+S)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+    <span class="media-save-label">Save</span>
+  </button>
+  <button class="media-cancel-edit" id="mediaCancelEdit" onclick="cancelEdit()" title="Cancel (Esc)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
   </button>
   <button class="media-nav prev" onclick="prevMedia()" id="mediaPrev">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
@@ -2982,6 +3083,17 @@
 
 <!-- Toasts -->
 <div class="toast-container" id="toasts"></div>
+
+<script src="/vendor/codemirror/codemirror.min.js"></script>
+<script src="/vendor/codemirror/mode/javascript/javascript.min.js"></script>
+<script src="/vendor/codemirror/mode/css/css.min.js"></script>
+<script src="/vendor/codemirror/mode/xml/xml.min.js"></script>
+<script src="/vendor/codemirror/mode/htmlmixed/htmlmixed.min.js"></script>
+<script src="/vendor/codemirror/mode/markdown/markdown.min.js"></script>
+<script src="/vendor/codemirror/mode/python/python.min.js"></script>
+<script src="/vendor/codemirror/mode/shell/shell.min.js"></script>
+<script src="/vendor/codemirror/mode/yaml/yaml.min.js"></script>
+<script src="/vendor/codemirror/mode/sql/sql.min.js"></script>
 
 <script>
 let currentPath = "";
@@ -3389,15 +3501,63 @@ function showMediaItem(index) {
 }
 
 function closeMedia() {
+  if (editingActive && editorIsDirty()) {
+    if (!confirm("Discard unsaved changes?")) return;
+  }
   document.getElementById("mediaOverlay").classList.remove("visible");
   document.getElementById("mediaContainer").textContent = "";
   document.body.style.overflow = "";
   // Clean up text preview state
   currentTextItem = null;
+  currentTextContent = "";
+  editingActive = false;
+  if (currentEditor) {
+    currentEditor.toTextArea && currentEditor.toTextArea();
+    currentEditor = null;
+  }
   document.getElementById("mediaDownload").style.display = "none";
+  document.getElementById("mediaEdit").style.display = "none";
+  document.getElementById("mediaSave").style.display = "none";
+  document.getElementById("mediaCancelEdit").style.display = "none";
 }
 
 let currentTextItem = null;
+let currentTextContent = "";
+let currentEditor = null;
+let editingActive = false;
+
+// File extensions safe to edit as text
+const EDITABLE_EXTENSIONS = new Set([
+  "txt","md","markdown","log","ini","conf","cfg","env","properties",
+  "json","yaml","yml","toml","xml","html","htm","css","scss","sass","less",
+  "js","mjs","cjs","jsx","ts","tsx","py","rb","php","go","rs","java","kt",
+  "c","cpp","cc","h","hpp","cs","swift","sh","bash","zsh","fish",
+  "sql","csv","tsv","ps1","dockerfile","makefile","gitignore","gitattributes",
+  "lock","tex","r","lua","pl","vue","svelte","astro"
+]);
+
+function isEditable(name) {
+  const ext = getExt(name);
+  if (EDITABLE_EXTENSIONS.has(ext)) return true;
+  // Recognise common no-extension files
+  const base = name.toLowerCase();
+  return base === "dockerfile" || base === "makefile" || base === "readme" || base === ".gitignore" || base === ".env";
+}
+
+function modeForFile(name) {
+  const ext = getExt(name);
+  if (ext === "js" || ext === "mjs" || ext === "cjs" || ext === "jsx" || ext === "ts" || ext === "tsx") return { name: "javascript", json: false };
+  if (ext === "json") return { name: "javascript", json: true };
+  if (ext === "css" || ext === "scss" || ext === "sass" || ext === "less") return "css";
+  if (ext === "html" || ext === "htm" || ext === "vue" || ext === "svelte" || ext === "astro") return "htmlmixed";
+  if (ext === "xml" || ext === "svg") return "xml";
+  if (ext === "md" || ext === "markdown") return "markdown";
+  if (ext === "py") return "python";
+  if (ext === "sh" || ext === "bash" || ext === "zsh" || ext === "fish") return "shell";
+  if (ext === "yaml" || ext === "yml") return "yaml";
+  if (ext === "sql") return "text/x-sql";
+  return null; // plain text
+}
 
 function openTextPreview(index) {
   const item = filteredItems[index];
@@ -3410,6 +3570,8 @@ function openTextPreview(index) {
   }
 
   currentTextItem = item;
+  currentTextContent = "";
+  editingActive = false;
   const overlay = document.getElementById("mediaOverlay");
   const container = document.getElementById("mediaContainer");
 
@@ -3429,6 +3591,9 @@ function openTextPreview(index) {
   document.getElementById("mediaPrev").style.display = "none";
   document.getElementById("mediaNext").style.display = "none";
   document.getElementById("mediaDownload").style.display = "flex";
+  document.getElementById("mediaEdit").style.display = isEditable(item.name) ? "flex" : "none";
+  document.getElementById("mediaSave").style.display = "none";
+  document.getElementById("mediaCancelEdit").style.display = "none";
 
   document.getElementById("mediaInfo").textContent = item.name;
   document.getElementById("mediaCounter").textContent = formatSize(item.size);
@@ -3444,22 +3609,8 @@ function openTextPreview(index) {
     })
     .then(text => {
       if (currentTextItem !== item) return; // closed or changed
-      container.textContent = "";
-
-      const wrapper = document.createElement("div");
-      wrapper.className = "text-preview";
-
-      const lines = text.split('\n');
-      const lineNums = document.createElement("div");
-      lineNums.className = "line-numbers";
-      lineNums.textContent = lines.map((_, i) => i + 1).join('\n');
-
-      const pre = document.createElement("pre");
-      pre.textContent = text;
-
-      wrapper.appendChild(lineNums);
-      wrapper.appendChild(pre);
-      container.appendChild(wrapper);
+      currentTextContent = text;
+      renderTextPreview(text);
     })
     .catch(() => {
       if (currentTextItem !== item) return;
@@ -3472,6 +3623,122 @@ function openTextPreview(index) {
       errDiv.appendChild(errText);
       container.appendChild(errDiv);
     });
+}
+
+function renderTextPreview(text) {
+  const container = document.getElementById("mediaContainer");
+  container.textContent = "";
+
+  const wrapper = document.createElement("div");
+  wrapper.className = "text-preview";
+
+  const lines = text.split('\n');
+  const lineNums = document.createElement("div");
+  lineNums.className = "line-numbers";
+  lineNums.textContent = lines.map((_, i) => i + 1).join('\n');
+
+  const pre = document.createElement("pre");
+  pre.textContent = text;
+
+  wrapper.appendChild(lineNums);
+  wrapper.appendChild(pre);
+  container.appendChild(wrapper);
+}
+
+function toggleEditMode() {
+  if (!currentTextItem) return;
+  if (editingActive) {
+    cancelEdit();
+  } else {
+    enterEditMode();
+  }
+}
+
+function enterEditMode() {
+  if (!currentTextItem || typeof CodeMirror === "undefined") {
+    toast("Editor failed to load", "error");
+    return;
+  }
+  editingActive = true;
+  const container = document.getElementById("mediaContainer");
+  container.textContent = "";
+
+  const wrapper = document.createElement("div");
+  wrapper.className = "text-preview editing";
+  const textarea = document.createElement("textarea");
+  textarea.value = currentTextContent;
+  wrapper.appendChild(textarea);
+  container.appendChild(wrapper);
+
+  const theme = document.body.classList.contains("light-theme") ? "eclipse" : "material-darker";
+  currentEditor = CodeMirror.fromTextArea(textarea, {
+    mode: modeForFile(currentTextItem.name),
+    theme,
+    lineNumbers: true,
+    lineWrapping: true,
+    indentUnit: 2,
+    tabSize: 2,
+    autofocus: true,
+    extraKeys: {
+      "Ctrl-S": () => saveEdit(),
+      "Cmd-S": () => saveEdit(),
+      "Esc": () => cancelEdit(),
+    },
+  });
+
+  document.getElementById("mediaEdit").style.display = "none";
+  document.getElementById("mediaDownload").style.display = "none";
+  document.getElementById("mediaSave").style.display = "flex";
+  document.getElementById("mediaCancelEdit").style.display = "flex";
+}
+
+function editorIsDirty() {
+  return currentEditor && currentEditor.getValue() !== currentTextContent;
+}
+
+function cancelEdit() {
+  if (editorIsDirty() && !confirm("Discard unsaved changes?")) return;
+  editingActive = false;
+  if (currentEditor) {
+    currentEditor.toTextArea();
+    currentEditor = null;
+  }
+  renderTextPreview(currentTextContent);
+  document.getElementById("mediaEdit").style.display = isEditable(currentTextItem.name) ? "flex" : "none";
+  document.getElementById("mediaDownload").style.display = "flex";
+  document.getElementById("mediaSave").style.display = "none";
+  document.getElementById("mediaCancelEdit").style.display = "none";
+}
+
+async function saveEdit() {
+  if (!editingActive || !currentTextItem || !currentEditor) return;
+  const saveBtn = document.getElementById("mediaSave");
+  if (saveBtn.disabled) return;
+  const newContent = currentEditor.getValue();
+  saveBtn.disabled = true;
+  saveBtn.classList.add("saving");
+  try {
+    const res = await fetch("/api/save", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: currentTextItem.path, content: newContent }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "Save failed");
+    currentTextContent = newContent;
+    if (typeof data.size === "number") {
+      currentTextItem.size = data.size;
+      document.getElementById("mediaCounter").textContent = formatSize(data.size);
+    }
+    toast("Saved " + currentTextItem.name, "success");
+    // Refresh the current folder so size/mtime update
+    navigate(currentPath, { pushHistory: false, navPush: false });
+  } catch (err) {
+    toast(err.message || "Save failed", "error");
+  } finally {
+    saveBtn.disabled = false;
+    saveBtn.classList.remove("saving");
+  }
 }
 
 function downloadCurrentPreview() {
@@ -6129,6 +6396,24 @@ document.addEventListener("keydown", e => {
 
   // Media overlay navigation
   if (mediaOpen) {
+    if (editingActive) {
+      if ((e.ctrlKey || e.metaKey) && (e.key === "s" || e.key === "S")) {
+        e.preventDefault();
+        saveEdit();
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        cancelEdit();
+        return;
+      }
+      return; // editor handles its own keys
+    }
+    if ((e.ctrlKey || e.metaKey) && (e.key === "e" || e.key === "E") && currentTextItem && isEditable(currentTextItem.name)) {
+      e.preventDefault();
+      enterEditMode();
+      return;
+    }
     if (e.key === "Escape") {
       closeMedia();
       return;
@@ -7006,6 +7291,33 @@ initApp = async function() {
 // Register service worker for PWA
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("/sw.js").catch(() => {});
+}
+
+// PWA install prompt — show the Install button only when Chrome reports the app is installable
+let deferredInstallPrompt = null;
+window.addEventListener("beforeinstallprompt", (e) => {
+  e.preventDefault();
+  deferredInstallPrompt = e;
+  const btn = document.getElementById("installBtn");
+  if (btn && !window.matchMedia("(display-mode: standalone)").matches) {
+    btn.style.display = "";
+  }
+});
+window.addEventListener("appinstalled", () => {
+  deferredInstallPrompt = null;
+  const btn = document.getElementById("installBtn");
+  if (btn) btn.style.display = "none";
+});
+async function installApp() {
+  if (!deferredInstallPrompt) {
+    toast("Install isn't available yet — try reloading over HTTPS", "info");
+    return;
+  }
+  deferredInstallPrompt.prompt();
+  await deferredInstallPrompt.userChoice;
+  deferredInstallPrompt = null;
+  const btn = document.getElementById("installBtn");
+  if (btn) btn.style.display = "none";
 }
 </script>
 </body>
