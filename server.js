@@ -624,6 +624,9 @@ app.get("/manifest.json", (_req, res) => res.sendFile(path.join(__dirname, "publ
 app.get("/icon-192.svg", (_req, res) => res.type("image/svg+xml").sendFile(path.join(__dirname, "public", "icon-192.svg")));
 app.get("/icon-512.svg", (_req, res) => res.type("image/svg+xml").sendFile(path.join(__dirname, "public", "icon-512.svg")));
 app.get("/icon-maskable.svg", (_req, res) => res.type("image/svg+xml").sendFile(path.join(__dirname, "public", "icon-maskable.svg")));
+app.get("/icon-192.png", (_req, res) => res.type("image/png").sendFile(path.join(__dirname, "public", "icon-192.png")));
+app.get("/icon-512.png", (_req, res) => res.type("image/png").sendFile(path.join(__dirname, "public", "icon-512.png")));
+app.get("/icon-maskable-512.png", (_req, res) => res.type("image/png").sendFile(path.join(__dirname, "public", "icon-maskable-512.png")));
 
 // File extensions that should never be served with their natural MIME type
 const UNSAFE_EXTENSIONS = new Set([".html", ".htm", ".svg", ".xml", ".xhtml", ".svgz"]);
@@ -1017,7 +1020,8 @@ const startLog = () => {
   console.log(`Configured: ${isConfigured() ? "yes" : "no (setup required)"}`);
 };
 
-app.listen(config.port, "0.0.0.0", () => {
-  console.log(`File Explorer running at http://0.0.0.0:${config.port}`);
+const host = process.env.HOST || "0.0.0.0";
+app.listen(config.port, host, () => {
+  console.log(`File Explorer running at http://${host}:${config.port}`);
   startLog();
 });
