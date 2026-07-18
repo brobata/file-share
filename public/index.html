@@ -4472,16 +4472,18 @@ async function navigate(path, { pushHistory = true, navPush = true } = {}) {
   const savedScrollY = isRefresh ? window.scrollY : 0;
   currentPath = path || defaultDir;
 
-  // Push browser history state so back/forward buttons navigate folders
-  if (pushHistory) {
-    history.pushState({ path: currentPath }, "", "#" + encodeURIComponent(currentPath));
-  }
-
-  // Track navigation history for back/forward buttons
-  if (navPush) {
+  // Track navigation history for back/forward buttons.
+  // A refresh of the current folder must not stack duplicate entries,
+  // or Back appears to do nothing until the duplicates are exhausted.
+  if (navPush && !isRefresh) {
     navHistory = navHistory.slice(0, navHistoryIndex + 1);
     navHistory.push(currentPath);
     navHistoryIndex = navHistory.length - 1;
+  }
+
+  // Push browser history state so back/forward buttons navigate folders
+  if (pushHistory && !isRefresh) {
+    history.pushState({ path: currentPath, navIndex: navHistoryIndex }, "", "#" + encodeURIComponent(currentPath));
   }
   updateNavButtons();
 
@@ -4524,6 +4526,10 @@ async function navigate(path, { pushHistory = true, navPush = true } = {}) {
 // Browser back/forward button navigates folders
 window.addEventListener("popstate", (e) => {
   if (e.state && e.state.path) {
+    // Keep the in-app back/forward pointer in sync with browser navigation
+    if (typeof e.state.navIndex === "number") {
+      navHistoryIndex = e.state.navIndex;
+    }
     navigate(e.state.path, { pushHistory: false, navPush: false });
   }
 });
@@ -5058,11 +5064,10 @@ function updateCutPending() {
 
 // Keyboard navigation
 function setFocused(index) {
-  document.querySelectorAll(".file-item.focused, .details-row.focused").forEach(el => el.classList.remove("focused"));
+  document.querySelectorAll("#fileGrid .focused").forEach(el => el.classList.remove("focused"));
   focusedIndex = index;
   if (index >= 0 && index < filteredItems.length) {
-    const sel = viewMode === "details" ? ".details-row" : ".file-item";
-    const el = document.querySelector(sel + '[data-index="' + index + '"]');
+    const el = document.querySelector('#fileGrid [data-index="' + index + '"]');
     if (el) {
       el.classList.add("focused");
       el.scrollIntoView({ block: "nearest" });
@@ -5090,13 +5095,10 @@ function startInlineRename(index) {
   if (!item) return;
   contextTarget = item;
 
-  const sel = viewMode === "details" ? ".details-row" : ".file-item";
-  const el = document.querySelector(sel + '[data-index="' + index + '"]');
+  const el = document.querySelector('#fileGrid [data-index="' + index + '"]');
   if (!el) return;
 
-  const nameEl = viewMode === "details"
-    ? el.querySelector(".name-text")
-    : el.querySelector(".name");
+  const nameEl = el.querySelector(".name-text") || el.querySelector(".compact-name") || el.querySelector(".name");
   if (!nameEl) return;
 
   const oldName = item.name;
@@ -5351,7 +5353,7 @@ function toggleSelect(index, event) {
     return;
   }
 
-  const el = document.querySelector(`.file-item[data-index="${index}"]`);
+  const el = document.querySelector(`#fileGrid [data-index="${index}"]`);
   if (selectedPaths.has(item.path)) {
     selectedPaths.delete(item.path);
     if (el) el.classList.remove("selected");
@@ -5370,7 +5372,7 @@ function selectRange(startIndex, endIndex) {
     const item = filteredItems[i];
     if (item && !selectedPaths.has(item.path)) {
       selectedPaths.add(item.path);
-      const el = document.querySelector(`.file-item[data-index="${i}"]`);
+      const el = document.querySelector(`#fileGrid [data-index="${i}"]`);
       if (el) el.classList.add("selected");
     }
   }
@@ -5382,7 +5384,7 @@ function selectAll() {
   filteredItems.forEach((item, index) => {
     if (!selectedPaths.has(item.path)) {
       selectedPaths.add(item.path);
-      const el = document.querySelector(`.file-item[data-index="${index}"]`);
+      const el = document.querySelector(`#fileGrid [data-index="${index}"]`);
       if (el) el.classList.add("selected");
     }
   });
@@ -5393,7 +5395,7 @@ function selectAll() {
 function clearSelection() {
   selectedPaths.clear();
   lastSelectedIndex = -1;
-  document.querySelectorAll(".file-item.selected").forEach(el => {
+  document.querySelectorAll("#fileGrid .selected").forEach(el => {
     el.classList.remove("selected");
   });
   updateSelectionUI();
@@ -5411,6 +5413,8 @@ function updateSelectionUI() {
     bar.classList.remove("visible");
     grid.classList.remove("has-selection");
   }
+  const detailsHeader = document.getElementById("detailsHeader");
+  if (detailsHeader) detailsHeader.classList.toggle("with-selection", count > 0);
   updateSelectedPath();
   updateStatusBar();
   updatePreviewPane();
@@ -5430,7 +5434,7 @@ function showContext(event, index) {
     clearSelection();
     selectedPaths.add(item.path);
     lastSelectedIndex = index;
-    const el = document.querySelector(`.file-item[data-index="${index}"], .details-row[data-index="${index}"]`);
+    const el = document.querySelector(`#fileGrid [data-index="${index}"]`);
     if (el) el.classList.add("selected");
     updateSelectionUI();
   }
@@ -6681,8 +6685,15 @@ function haptic(ms) { }
 let bottomSheetDragY = 0;
 let bottomSheetDragging = false;
 
+let bottomSheetHideTimeout = null;
+
 function showBottomSheet(menuItems, headerItem) {
   haptic(15);
+  // A pending hide from a just-dismissed sheet would strip this one's overlay
+  if (bottomSheetHideTimeout) {
+    clearTimeout(bottomSheetHideTimeout);
+    bottomSheetHideTimeout = null;
+  }
   const overlay = document.getElementById("bottomSheetOverlay");
   const sheet = document.getElementById("bottomSheet");
   const header = document.getElementById("bottomSheetHeader");
@@ -6765,6 +6776,12 @@ function showBottomSheet(menuItems, headerItem) {
       sheet.classList.add("visible");
     }
   };
+  handle.ontouchcancel = () => {
+    if (!bottomSheetDragging) return;
+    bottomSheetDragging = false;
+    sheet.style.transform = "";
+    sheet.classList.add("visible");
+  };
 }
 
 function hideBottomSheet() {
@@ -6772,7 +6789,11 @@ function hideBottomSheet() {
   const sheet = document.getElementById("bottomSheet");
   sheet.classList.remove("visible");
   sheet.style.transform = "";
-  setTimeout(() => overlay.classList.remove("visible"), 300);
+  if (bottomSheetHideTimeout) clearTimeout(bottomSheetHideTimeout);
+  bottomSheetHideTimeout = setTimeout(() => {
+    overlay.classList.remove("visible");
+    bottomSheetHideTimeout = null;
+  }, 300);
 }
 
 // --- Override showContext & showEmptySpaceContext for mobile ---
@@ -6780,6 +6801,16 @@ const _originalShowContext = showContext;
 showContext = function(event, index) {
   if (isMobile()) {
     event.preventDefault();
+    // Android fires a native contextmenu on long-press at ~the same moment
+    // as our 500ms timer — only one of the two may open the bottom sheet
+    if (event.type === "contextmenu") {
+      if (longPressFired) return;
+      if (longPressTimer) {
+        clearTimeout(longPressTimer);
+        longPressTimer = null;
+      }
+      longPressFired = true;
+    }
     const item = filteredItems[index];
     if (!item) return;
     if (!selectedPaths.has(item.path)) {
@@ -6863,15 +6894,25 @@ let touchStartX = 0, touchStartY = 0, touchStartTime = 0;
 let touchMoved = false;
 
 function initTouchHandlers() {
-  if (!isMobile()) return;
-
+  // Listeners attach regardless of viewport and check isMobile() per event,
+  // so rotating between portrait and landscape keeps working without reload
   const grid = document.getElementById("fileGrid");
 
   grid.addEventListener("touchstart", (e) => {
+    // Reset one-shot flags before any early return: a stale touchMoved
+    // (scroll with no click) or longPressFired (Android suppresses the
+    // click after contextmenu) would swallow the next tap
+    touchMoved = false;
+    longPressFired = false;
+    if (!isMobile()) return;
     const item = e.target.closest(".file-item, .details-row, .compact-row");
     if (!item) return;
     const index = parseInt(item.dataset.index);
     if (isNaN(index)) return;
+
+    // Touches starting in the edge zones are back/forward swipes, not presses
+    const startX = e.touches[0].clientX;
+    if (startX < 24 || startX > window.innerWidth - 24) return;
 
     touchStartX = e.touches[0].clientX;
     touchStartY = e.touches[0].clientY;
@@ -6909,6 +6950,18 @@ function initTouchHandlers() {
       longPressTimer = null;
     }
   }, { passive: true });
+
+  // The browser fires touchcancel (not touchend) when it takes over a gesture
+  // (back-swipe, scroll). Without this, the pending timer fires a phantom
+  // long-press that selects the item and opens the bottom sheet.
+  grid.addEventListener("touchcancel", () => {
+    if (longPressTimer) {
+      clearTimeout(longPressTimer);
+      longPressTimer = null;
+    }
+    longPressFired = false;
+    touchMoved = false;
+  }, { passive: true });
 }
 
 // Override handleClick for mobile: single tap opens, long press shows menu
@@ -6944,11 +6997,11 @@ let isPulling = false;
 let pullIndicatorEl = null;
 
 function initPullToRefresh() {
-  if (!isMobile()) return;
   pullIndicatorEl = document.getElementById("pullIndicator");
   const grid = document.getElementById("fileGrid");
 
   grid.addEventListener("touchstart", (e) => {
+    if (!isMobile()) { pullStartY = 0; return; }
     if (window.scrollY <= 0 && !isPulling) {
       pullStartY = e.touches[0].clientY;
     } else {
@@ -6986,6 +7039,15 @@ function initPullToRefresh() {
     } else {
       indicator.classList.remove("active", "ready");
       indicator.style.transform = "";
+    }
+    isPulling = false;
+    pullStartY = 0;
+  }, { passive: true });
+
+  grid.addEventListener("touchcancel", () => {
+    if (isPulling) {
+      pullIndicatorEl.classList.remove("active", "ready");
+      pullIndicatorEl.style.transform = "";
     }
     isPulling = false;
     pullStartY = 0;
@@ -7044,9 +7106,8 @@ let edgeSwipeSide = null;
 let edgeSwipeStartX = 0;
 
 function initEdgeSwipe() {
-  if (!isMobile()) return;
-
   document.addEventListener("touchstart", (e) => {
+    if (!isMobile()) { edgeSwipeActive = false; edgeSwipeSide = null; return; }
     const x = e.touches[0].clientX;
     const w = window.innerWidth;
     if (x < 20) {
@@ -7057,6 +7118,11 @@ function initEdgeSwipe() {
       edgeSwipeActive = true;
       edgeSwipeSide = "right";
       edgeSwipeStartX = x;
+    } else {
+      // Reset state left over from a cancelled gesture so a normal tap
+      // can't be misread as an edge swipe
+      edgeSwipeActive = false;
+      edgeSwipeSide = null;
     }
   }, { passive: true });
 
@@ -7078,6 +7144,14 @@ function initEdgeSwipe() {
     } else if (edgeSwipeSide === "right" && dx < -80) {
       navigateForward();
     }
+    edgeSwipeActive = false;
+    edgeSwipeSide = null;
+  }, { passive: true });
+
+  document.addEventListener("touchcancel", () => {
+    if (!edgeSwipeActive) return;
+    document.getElementById("edgeLeft").classList.remove("active");
+    document.getElementById("edgeRight").classList.remove("active");
     edgeSwipeActive = false;
     edgeSwipeSide = null;
   }, { passive: true });
@@ -7290,7 +7364,12 @@ function resetPinchZoom() {
 }
 
 // --- Initialize all mobile features ---
+let mobileFeaturesInitialized = false;
 function initMobileFeatures() {
+  // initApp re-runs on re-login; attaching the gesture listeners twice
+  // makes long-press timers orphan each other and edge swipes fire double
+  if (mobileFeaturesInitialized) return;
+  mobileFeaturesInitialized = true;
   initTouchHandlers();
   initPullToRefresh();
   initEdgeSwipe();

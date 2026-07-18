@@ -25,7 +25,14 @@ function parseCookies(cookieHeader) {
   if (!cookieHeader) return cookies;
   cookieHeader.split(";").forEach((c) => {
     const [name, ...rest] = c.trim().split("=");
-    if (name) cookies[name] = decodeURIComponent(rest.join("="));
+    if (!name) return;
+    const value = rest.join("=");
+    // A malformed % sequence (possibly from another app on this host) must not throw
+    try {
+      cookies[name] = decodeURIComponent(value);
+    } catch {
+      cookies[name] = value;
+    }
   });
   return cookies;
 }
@@ -82,6 +89,7 @@ function loadConfig() {
   // Generate a separate token secret if missing
   if (!merged.tokenSecret) {
     merged.tokenSecret = crypto.randomBytes(32).toString("hex");
+    merged._tokenSecretGenerated = true;
   }
 
   // ENV overrides
@@ -108,6 +116,7 @@ function saveConfig(cfg) {
     fsSync.mkdirSync(dir, { recursive: true });
   }
   const persist = {
+    port: cfg.port,
     username: cfg.username,
     sharedDir: cfg.sharedDir,
     allowFullFilesystem: cfg.allowFullFilesystem,
@@ -167,7 +176,11 @@ function validateAuthToken(token) {
   const [issuedAt, expiryMs, hmac] = parts;
   const payload = issuedAt + "." + expiryMs;
   const expected = crypto.createHmac("sha256", config.tokenSecret).update(payload).digest("hex");
-  if (!crypto.timingSafeEqual(Buffer.from(hmac), Buffer.from(expected))) return false;
+  const hmacBuf = Buffer.from(hmac);
+  const expectedBuf = Buffer.from(expected);
+  // timingSafeEqual throws on length mismatch, which would turn a bad cookie into a 500
+  if (hmacBuf.length !== expectedBuf.length) return false;
+  if (!crypto.timingSafeEqual(hmacBuf, expectedBuf)) return false;
   const expiry = parseInt(expiryMs, 10);
   if (expiry > 0) {
     const age = Date.now() - parseInt(issuedAt, 10);
@@ -178,7 +191,8 @@ function validateAuthToken(token) {
 
 let config = loadConfig();
 // Ensure tokenSecret is persisted if newly generated
-if (!config._savedTokenSecret) {
+if (config._tokenSecretGenerated) {
+  delete config._tokenSecretGenerated;
   saveConfig(config);
 }
 
@@ -329,7 +343,10 @@ function safePath(requestedPath) {
     return resolved;
   }
 
-  if (!resolved.startsWith(config.sharedDir)) {
+  // Boundary-safe containment check: a plain startsWith would let
+  // /home/user/shared-private slip past a /home/user/shared jail
+  const base = path.resolve(config.sharedDir);
+  if (resolved !== base && !resolved.startsWith(base + path.sep)) {
     throw new Error("Access denied");
   }
   return resolved;
@@ -485,7 +502,9 @@ const upload = multer({
   limits: { fileSize: 500 * 1024 * 1024, files: 2000 },
 });
 
-app.use(express.json({ limit: "100kb" }));
+// /api/save has its own 5mb parser; the global parser must not consume its body first
+const jsonBodyParser = express.json({ limit: "100kb" });
+app.use((req, res, next) => (req.path === "/api/save" ? next() : jsonBodyParser(req, res, next)));
 app.use(express.urlencoded({ extended: true, limit: "100kb" }));
 
 // Auth middleware
@@ -642,7 +661,7 @@ app.get("/files/{*filepath}", (req, res) => {
     if (Array.isArray(filePath)) {
       filePath = filePath.join("/");
     }
-    filePath = decodeURIComponent(filePath);
+    // Express 5 already URL-decodes params; decoding again corrupts names containing %
     if (!filePath.startsWith("/")) {
       filePath = "/" + filePath;
     }
@@ -731,6 +750,13 @@ app.get("/api/list", requireAuth, async (req, res) => {
 // API: Upload files
 app.post("/api/upload", requireAuth, upload.array("files", 2000), (req, res) => {
   res.json({ uploaded: req.files.map((f) => f.originalname) });
+}, (err, req, res, next) => {
+  // Multer errors (file too big, invalid path) must return JSON, not an HTML 500
+  if (err instanceof multer.MulterError) {
+    const status = err.code === "LIMIT_FILE_SIZE" ? 413 : 400;
+    return res.status(status).json({ error: err.message });
+  }
+  res.status(400).json({ error: err.message || "Upload failed" });
 });
 
 // API: Create folder — validates name to prevent path traversal
@@ -832,7 +858,17 @@ app.post("/api/move", requireAuth, async (req, res) => {
       // Good, destination doesn't exist
     }
 
-    await fs.rename(sourcePath, destPath);
+    try {
+      await fs.rename(sourcePath, destPath);
+    } catch (err) {
+      if (err.code === "EXDEV") {
+        // rename can't cross filesystems (e.g. moving to a mounted drive)
+        await fs.cp(sourcePath, destPath, { recursive: true });
+        await fs.rm(sourcePath, { recursive: true, force: true });
+      } else {
+        throw err;
+      }
+    }
     res.json({ ok: true });
   } catch {
     res.status(400).json({ error: "Move failed" });
@@ -979,7 +1015,12 @@ app.get("/api/download", async (req, res) => {
       res.setHeader('X-Content-Type-Options', 'nosniff');
 
       const archive = archiver('zip', { zlib: { level: 5 } });
-      archive.on('error', () => { if (!res.headersSent) res.status(500).end(); });
+      archive.on('error', () => {
+        if (!res.headersSent) res.status(500).end();
+        else res.destroy();
+      });
+      // Stop walking/reading the tree if the client cancels the download
+      res.on('close', () => archive.destroy());
       archive.pipe(res);
       archive.directory(file, fileName);
       await archive.finalize();
