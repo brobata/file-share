@@ -2498,6 +2498,24 @@
   .compact-row.selected {
     background: rgba(59,130,246,0.12);
   }
+  .compact-row .checkbox {
+    flex-shrink: 0;
+    width: 18px;
+    height: 18px;
+    border: 2px solid var(--border);
+    border-radius: 5px;
+    background: var(--surface);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: all 0.15s ease;
+    cursor: pointer;
+  }
+  .compact-row .checkbox svg { width: 11px; height: 11px; stroke: #fff; stroke-width: 3; opacity: 0; }
+  .compact-row:hover .checkbox, .compact-row.selected .checkbox, .has-selection .compact-row .checkbox { opacity: 1; }
+  .compact-row.selected .checkbox { background: var(--accent); border-color: var(--accent); }
+  .compact-row.selected .checkbox svg { opacity: 1; }
   .compact-row .compact-icon {
     width: 20px;
     height: 20px;
@@ -2533,6 +2551,10 @@
     .toast-container { bottom: 70px; }
     /* Hide desktop context menu on mobile */
     .context-menu { display: none !important; }
+    /* No hover on touch screens — selection checkboxes are always visible */
+    .file-item .checkbox,
+    .details-row .checkbox,
+    .compact-row .checkbox { opacity: 1; }
   }
 </style>
 </head>
@@ -3043,6 +3065,19 @@
 </div>
 
 <!-- Batch Rename modal -->
+<!-- Upload overwrite confirmation -->
+<div class="modal-overlay" id="overwriteModal" onclick="if(event.target===this)resolveOverwrite('cancel')">
+  <div class="modal">
+    <h3>Files already exist</h3>
+    <p id="overwriteMessage" style="margin:0 0 16px;font-size:13px;color:var(--text-muted);"></p>
+    <div class="modal-actions">
+      <button class="btn" onclick="resolveOverwrite('cancel')">Cancel</button>
+      <button class="btn" onclick="resolveOverwrite('rename')">Keep Both</button>
+      <button class="btn btn-primary" onclick="resolveOverwrite('replace')">Replace</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="batchRenameModal">
   <div class="modal" style="max-width:520px">
     <h3>Batch Rename</h3>
@@ -5725,9 +5760,59 @@ async function handleDataTransfer(dt) {
 }
 
 // Accepts either a FileList/File[] or an array of {file, relPath} objects.
+// Overwrite confirmation: resolves to "replace", "rename" (keep both), or "cancel"
+let overwriteResolve = null;
+
+function askOverwrite(existing) {
+  return new Promise((resolve) => {
+    overwriteResolve = resolve;
+    const msg = existing.length === 1
+      ? `"${existing[0]}" already exists in this folder. Replace it, or keep both?`
+      : `${existing.length} files already exist in this folder. Replace them, or keep both?`;
+    document.getElementById("overwriteMessage").textContent = msg;
+    document.getElementById("overwriteModal").classList.add("visible");
+  });
+}
+
+function resolveOverwrite(choice) {
+  closeModal("overwriteModal");
+  if (overwriteResolve) {
+    overwriteResolve(choice);
+    overwriteResolve = null;
+  }
+}
+
 async function uploadFiles(items) {
   const list = Array.from(items);
   if (!list.length) return;
+
+  // Ask before overwriting same-named files (check is best-effort:
+  // if it fails, the upload proceeds with the old replace behavior)
+  let uploadMode = "";
+  try {
+    const relPaths = list.map(item => {
+      const file = item.file || item;
+      return item.relPath || file.webkitRelativePath || file.name;
+    });
+    const checkRes = await fetch("/api/upload-check", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: currentPath, files: relPaths })
+    });
+    if (checkRes.ok) {
+      const { existing } = await checkRes.json();
+      if (existing && existing.length > 0) {
+        const choice = await askOverwrite(existing);
+        if (choice === "cancel") {
+          document.getElementById("fileInput").value = "";
+          document.getElementById("folderUploadInput").value = "";
+          return;
+        }
+        if (choice === "rename") uploadMode = "rename";
+      }
+    }
+  } catch { /* proceed without the prompt */ }
+
   const bar = document.getElementById("uploadBar");
   const label = document.getElementById("uploadLabel");
   const progress = document.getElementById("uploadProgress");
@@ -5767,7 +5852,7 @@ async function uploadFiles(items) {
       toast("Upload failed", "error");
       bar.classList.remove("visible");
     };
-    xhr.open("POST", "/api/upload?path=" + encodeURIComponent(currentPath));
+    xhr.open("POST", "/api/upload?path=" + encodeURIComponent(currentPath) + (uploadMode ? "&mode=" + uploadMode : ""));
     // Cookie sent automatically
     xhr.send(formData);
   } catch {
@@ -7239,6 +7324,11 @@ function renderCompactView(items) {
       row.ondrop = (e) => handleFileDrop(e, index);
     }
 
+    const cb = document.createElement("div");
+    cb.className = "checkbox";
+    cb.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="20 6 9 17 4 12"/></svg>';
+    cb.onclick = (e) => { e.stopPropagation(); toggleSelect(index, e); };
+
     const iconDiv = document.createElement("div");
     iconDiv.className = "compact-icon";
     // getFileIcon returns internal SVG markup
@@ -7254,6 +7344,7 @@ function renderCompactView(items) {
     sizeDiv.className = "compact-size";
     sizeDiv.textContent = item.isDirectory ? "" : formatSize(item.size);
 
+    row.appendChild(cb);
     row.appendChild(iconDiv);
     row.appendChild(nameDiv);
     row.appendChild(sizeDiv);

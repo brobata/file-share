@@ -487,15 +487,32 @@ const storage = multer.diskStorage({
       cb(new Error("Invalid path"));
     }
   },
-  filename: (_req, file, cb) => {
+  filename: (req, file, cb) => {
     try {
-      const { base } = sanitizeRelativePath(file.originalname);
+      const { dir, base } = sanitizeRelativePath(file.originalname);
+      if (req.query.mode === "rename") {
+        // "Keep both": append (1), (2)... instead of overwriting
+        const basePath = safePath(req.query.path || "");
+        const destDir = dir ? safePath(path.join(basePath, dir)) : basePath;
+        return cb(null, uniqueFilename(destDir, base));
+      }
       cb(null, base);
     } catch {
       cb(new Error("Invalid filename"));
     }
   },
 });
+
+function uniqueFilename(dir, base) {
+  if (!fsSync.existsSync(path.join(dir, base))) return base;
+  const ext = path.extname(base);
+  const stem = base.slice(0, base.length - ext.length);
+  for (let i = 1; i < 1000; i++) {
+    const candidate = `${stem} (${i})${ext}`;
+    if (!fsSync.existsSync(path.join(dir, candidate))) return candidate;
+  }
+  throw new Error("Too many name collisions");
+}
 const upload = multer({
   storage,
   preservePath: true,
@@ -748,6 +765,29 @@ app.get("/api/list", requireAuth, async (req, res) => {
 });
 
 // API: Upload files
+// API: Check which upload targets already exist, so the client can ask
+// before overwriting. Best-effort — the upload itself decides via ?mode=.
+app.post("/api/upload-check", requireAuth, (req, res) => {
+  try {
+    const basePath = safePath(req.body.path || "");
+    const files = Array.isArray(req.body.files) ? req.body.files.slice(0, 2000) : [];
+    const existing = [];
+    for (const rel of files) {
+      if (typeof rel !== "string") continue;
+      try {
+        const { dir, base } = sanitizeRelativePath(rel);
+        const target = safePath(path.join(basePath, dir, base));
+        if (fsSync.existsSync(target)) existing.push(rel);
+      } catch {
+        // Invalid names get rejected by the upload itself
+      }
+    }
+    res.json({ existing });
+  } catch {
+    res.status(400).json({ error: "Check failed" });
+  }
+});
+
 app.post("/api/upload", requireAuth, upload.array("files", 2000), (req, res) => {
   res.json({ uploaded: req.files.map((f) => f.originalname) });
 }, (err, req, res, next) => {
