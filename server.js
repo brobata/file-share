@@ -622,6 +622,9 @@ app.post("/api/settings", requireAuth, (req, res) => {
     }
     config.passwordHash = bcrypt.hashSync(newPassword, BCRYPT_ROUNDS);
     config.salt = "bcrypt";
+    // Rotate the token secret so every other session is logged out;
+    // this request gets a fresh cookie below, so this device stays in
+    config.tokenSecret = crypto.randomBytes(32).toString("hex");
   }
 
   if (sharedDir !== undefined && sharedDir !== config.sharedDir) {

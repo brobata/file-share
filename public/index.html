@@ -5821,44 +5821,69 @@ async function uploadFiles(items) {
   label.textContent = `Uploading ${list.length} file(s)...`;
   progress.style.width = "0%";
 
-  const formData = new FormData();
+  // Split into batches so huge folder uploads don't go up as one giant
+  // request (browsers choke on multi-GB multipart bodies)
+  const BATCH_MAX_BYTES = 200 * 1024 * 1024;
+  const BATCH_MAX_FILES = 100;
+  const batches = [];
+  let batch = [], batchBytes = 0;
   for (const item of list) {
     const file = item.file || item;
-    const relPath = item.relPath || file.webkitRelativePath || file.name;
-    formData.append("files", file, relPath);
+    if (batch.length && (batchBytes + file.size > BATCH_MAX_BYTES || batch.length >= BATCH_MAX_FILES)) {
+      batches.push(batch);
+      batch = [];
+      batchBytes = 0;
+    }
+    batch.push(item);
+    batchBytes += file.size;
   }
+  if (batch.length) batches.push(batch);
 
-  try {
+  const totalBytes = list.reduce((sum, item) => sum + (item.file || item).size, 0) || 1;
+  let doneBytes = 0;
+  let uploadedCount = 0;
+
+  const uploadBatch = (items) => new Promise((resolve, reject) => {
+    const formData = new FormData();
+    for (const item of items) {
+      const file = item.file || item;
+      const relPath = item.relPath || file.webkitRelativePath || file.name;
+      formData.append("files", file, relPath);
+    }
     const xhr = new XMLHttpRequest();
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) {
-        const pct = Math.round((e.loaded / e.total) * 100);
+        const pct = Math.min(100, Math.round(((doneBytes + e.loaded) / totalBytes) * 100));
         progress.style.width = pct + "%";
-        label.textContent = `Uploading ${list.length} file(s)... ${pct}%`;
+        label.textContent = `Uploading ${uploadedCount + items.length}/${list.length} file(s)... ${pct}%`;
       }
     };
     xhr.onload = () => {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        toast(`Uploaded ${list.length} file(s)`, "success");
-      } else {
-        toast("Upload failed", "error");
-      }
-      bar.classList.remove("visible");
-      navigate(currentPath);
-      document.getElementById("fileInput").value = "";
-      document.getElementById("folderUploadInput").value = "";
+      if (xhr.status >= 200 && xhr.status < 300) resolve();
+      else reject(new Error("HTTP " + xhr.status));
     };
-    xhr.onerror = () => {
-      toast("Upload failed", "error");
-      bar.classList.remove("visible");
-    };
+    xhr.onerror = () => reject(new Error("Network error"));
     xhr.open("POST", "/api/upload?path=" + encodeURIComponent(currentPath) + (uploadMode ? "&mode=" + uploadMode : ""));
     // Cookie sent automatically
     xhr.send(formData);
+  });
+
+  try {
+    for (const items of batches) {
+      await uploadBatch(items);
+      uploadedCount += items.length;
+      doneBytes += items.reduce((sum, item) => sum + (item.file || item).size, 0);
+    }
+    toast(`Uploaded ${uploadedCount} file(s)`, "success");
   } catch {
-    toast("Upload failed", "error");
-    bar.classList.remove("visible");
+    toast(uploadedCount > 0
+      ? `Upload failed after ${uploadedCount} of ${list.length} file(s)`
+      : "Upload failed", "error");
   }
+  bar.classList.remove("visible");
+  navigate(currentPath);
+  document.getElementById("fileInput").value = "";
+  document.getElementById("folderUploadInput").value = "";
 }
 
 // Full page drag & drop
