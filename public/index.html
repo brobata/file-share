@@ -2556,6 +2556,41 @@
     .details-row .checkbox,
     .compact-row .checkbox { opacity: 1; }
   }
+  /* Hover info card — full metadata for a file item (mouse/trackpad only) */
+  .hover-info {
+    position: fixed;
+    z-index: 1500;
+    max-width: 380px;
+    min-width: 220px;
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 12px;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.45);
+    font-size: 12px;
+    line-height: 1.45;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.12s ease;
+    display: none;
+  }
+  .hover-info.visible { opacity: 1; }
+  .hover-info .hi-name {
+    font-weight: 600;
+    font-size: 13px;
+    margin-bottom: 6px;
+    word-break: break-word;
+  }
+  .hover-info dl {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 3px 12px;
+    margin: 0;
+  }
+  .hover-info dt { color: var(--text-muted); }
+  .hover-info dd { margin: 0; word-break: break-all; }
+  .light-theme .hover-info { box-shadow: 0 8px 24px rgba(0,0,0,0.15); }
 </style>
 </head>
 <body>
@@ -4810,7 +4845,6 @@ function renderGrid(items) {
     info.className = "info";
     const nameDiv = document.createElement("div");
     nameDiv.className = "name";
-    nameDiv.title = item.name;
     nameDiv.textContent = item.name;
     const metaDiv = document.createElement("div");
     metaDiv.className = "meta";
@@ -4924,7 +4958,6 @@ function renderDetailsView(items) {
     nameCell.appendChild(iconSpan);
     const nameText = document.createElement("span");
     nameText.className = "name-text";
-    nameText.title = item.name;
     nameText.textContent = item.name;
     nameCell.appendChild(nameText);
     row.appendChild(nameCell);
@@ -7555,6 +7588,99 @@ async function installApp() {
   const btn = document.getElementById("installBtn");
   if (btn) btn.style.display = "none";
 }
+// Hover info card: after a short hover on a file item, show full name, path,
+// size, dates and permissions. Mouse/trackpad only — touch has long-press.
+(function initHoverInfo() {
+  if (!window.matchMedia("(hover: hover) and (pointer: fine)").matches) return;
+  const HOVER_DELAY = 600;
+  const card = document.createElement("div");
+  card.className = "hover-info";
+  document.body.appendChild(card);
+  let timer = null;
+  let hoverEl = null;
+  let mouseX = 0, mouseY = 0;
+
+  function hide() {
+    clearTimeout(timer);
+    timer = null;
+    card.classList.remove("visible");
+    card.style.display = "none";
+  }
+
+  function validDate(d) {
+    const t = new Date(d).getTime();
+    return t > 0 ? formatDate(d) : null;
+  }
+
+  function fill(item) {
+    card.textContent = "";
+    const name = document.createElement("div");
+    name.className = "hi-name";
+    name.textContent = item.name;
+    card.appendChild(name);
+    const dl = document.createElement("dl");
+    const rows = [
+      ["Type", getFileType(item.name, item.isDirectory)],
+      ["Path", item.path],
+      ["Size", item.isDirectory ? null : formatSize(item.size) + (item.size >= 1024 ? " (" + item.size.toLocaleString() + " bytes)" : "")],
+      ["Created", validDate(item.created)],
+      ["Modified", validDate(item.modified)],
+      ["Permissions", item.permissions],
+    ];
+    for (const [label, value] of rows) {
+      if (value == null) continue;
+      const dt = document.createElement("dt");
+      dt.textContent = label;
+      const dd = document.createElement("dd");
+      dd.textContent = value;
+      dl.append(dt, dd);
+    }
+    card.appendChild(dl);
+  }
+
+  function position() {
+    const pad = 8, offset = 16;
+    const w = card.offsetWidth, h = card.offsetHeight;
+    let x = mouseX + offset, y = mouseY + offset;
+    if (x + w + pad > window.innerWidth) x = mouseX - w - offset;
+    if (y + h + pad > window.innerHeight) y = mouseY - h - offset;
+    card.style.left = Math.max(pad, x) + "px";
+    card.style.top = Math.max(pad, y) + "px";
+  }
+
+  function show() {
+    timer = null;
+    if (!hoverEl || !hoverEl.isConnected) return;
+    const item = filteredItems[+hoverEl.dataset.index];
+    if (!item || item.path !== hoverEl.dataset.path) return;
+    if (document.querySelector(".context-menu.visible")) return;
+    fill(item);
+    card.style.display = "block";
+    position();
+    card.classList.add("visible");
+  }
+
+  const grid = document.getElementById("fileGrid");
+  grid.addEventListener("mouseover", (e) => {
+    const el = e.target.closest("#fileGrid [data-index]");
+    if (el === hoverEl) return;
+    hide();
+    hoverEl = el;
+    if (el) timer = setTimeout(show, HOVER_DELAY);
+  });
+  grid.addEventListener("mouseleave", () => { hoverEl = null; hide(); });
+  grid.addEventListener("mousemove", (e) => {
+    mouseX = e.clientX;
+    mouseY = e.clientY;
+    // Moving within an item re-arms the delay so the card waits for the pointer to settle
+    if (timer) { clearTimeout(timer); timer = setTimeout(show, HOVER_DELAY); }
+  });
+  for (const ev of ["mousedown", "wheel", "keydown", "dragstart", "contextmenu"]) {
+    document.addEventListener(ev, hide, true);
+  }
+  document.addEventListener("scroll", hide, true);
+  window.addEventListener("blur", hide);
+})();
 </script>
 </body>
 </html>
