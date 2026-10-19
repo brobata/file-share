@@ -693,7 +693,7 @@ app.get("/files/{*filepath}", (req, res) => {
       res.setHeader("Content-Type", "text/plain; charset=utf-8");
       res.setHeader("X-Content-Type-Options", "nosniff");
     }
-    res.sendFile(resolved);
+    res.sendFile(resolved, { dotfiles: "allow" });
   } catch {
     res.status(400).json({ error: "File not accessible" });
   }
@@ -1075,7 +1075,7 @@ app.get("/api/download", async (req, res) => {
       res.setHeader('Content-Disposition', safeContentDisposition(fileName));
       res.setHeader('X-Content-Type-Options', 'nosniff');
 
-      res.download(file, fileName);
+      res.download(file, fileName, { dotfiles: "allow" });
     }
   } catch {
     if (!res.headersSent) res.status(400).json({ error: "Download failed" });
