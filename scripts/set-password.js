@@ -8,7 +8,11 @@
  *   `--tunnel` sets a separate username + password for files.brobata.com only
  *   (safe to let a work browser save: it never unlocks the LAN, and the
  *   authenticator code is still required); `--tunnel --remove` goes back to
- *   the main login there. Restart afterwards: `pm2 restart file-share`.
+ *   the main login there. `--tunnel --code-only` drops the username/password
+ *   there entirely (Access email code + authenticator code are the login).
+ *   `--code-only` does the same for the home network (`--code-only --off`
+ *   undoes it).
+ *   Restart afterwards: `pm2 restart file-share`.
  */
 const crypto = require("crypto");
 const fs = require("fs");
@@ -65,8 +69,36 @@ function save(config) {
     process.exit(1);
   }
 
+  if (!tunnel && process.argv.includes("--code-only")) {
+    if (process.argv.includes("--off")) {
+      delete config.lanCodeOnly;
+      save(config);
+      console.log("At home File-Share asks for the username and password again. Now run:  pm2 restart file-share");
+      return;
+    }
+    if (!config.totpSecret) {
+      console.error("Set up the authenticator first (scripts/set-totp.js), or there is no way in. Nothing changed.");
+      process.exit(1);
+    }
+    config.lanCodeOnly = true;
+    save(config);
+    console.log("At home File-Share now asks only for the authenticator code (\"remember me\" lasts 90 days). Now run:  pm2 restart file-share");
+    return;
+  }
+  if (tunnel && process.argv.includes("--code-only")) {
+    if (!config.totpSecret) {
+      console.error("Set up the authenticator first (scripts/set-totp.js), or there is no way in. Nothing changed.");
+      process.exit(1);
+    }
+    delete config.tunnelLogin;
+    config.tunnelCodeOnly = true;
+    save(config);
+    console.log("files.brobata.com now asks only for the authenticator code. Now run:  pm2 restart file-share");
+    return;
+  }
   if (tunnel && process.argv.includes("--remove")) {
     delete config.tunnelLogin;
+    delete config.tunnelCodeOnly;
     save(config);
     console.log("files.brobata.com uses the main login again. Now run:  pm2 restart file-share");
     return;
@@ -95,6 +127,7 @@ function save(config) {
       process.exit(1);
     }
     config.tunnelLogin = { username: tunnelUser, passwordHash: bcrypt.hashSync(first, BCRYPT_ROUNDS) };
+    delete config.tunnelCodeOnly; // a password again
     // Cookies are stateless: a new secret is the only way to end a session
     // still open on a lost laptop. (Signs out LAN browsers too.)
     config.tokenSecret = crypto.randomBytes(32).toString("hex");

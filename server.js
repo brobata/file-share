@@ -83,7 +83,7 @@ function parseCookies(cookieHeader) {
 function setAuthCookie(res, req, token, rememberMe) {
   const tunnel = isTunnelRequest(req);
   // Via tunnel (shared laptop): session cookie only, always Secure
-  const maxAge = rememberMe && !tunnel ? 30 * 24 * 60 * 60 : "";
+  const maxAge = rememberMe && !tunnel ? MAX_TOKEN_MS / 1000 : "";
   const secure = tunnel || req.secure || req.headers["x-forwarded-proto"] === "https";
   let cookie = `auth=${token}; Path=/; HttpOnly; SameSite=Strict`;
   if (secure) cookie += "; Secure";
@@ -178,6 +178,10 @@ function saveConfig(cfg) {
     // changed or removed), so a save here never brings back a removed login
     if (onDisk.tunnelLogin) cfg.tunnelLogin = onDisk.tunnelLogin;
     else delete cfg.tunnelLogin;
+    if (onDisk.tunnelCodeOnly === true) cfg.tunnelCodeOnly = true;
+    else delete cfg.tunnelCodeOnly;
+    if (onDisk.lanCodeOnly === true) cfg.lanCodeOnly = true;
+    else delete cfg.lanCodeOnly;
   } catch {}
   const persist = {
     port: cfg.port,
@@ -191,6 +195,8 @@ function saveConfig(cfg) {
     ...(cfg.totpSecret ? { totpSecret: cfg.totpSecret } : {}),
     ...(cfg.access ? { access: cfg.access } : {}),
     ...(cfg.tunnelLogin ? { tunnelLogin: cfg.tunnelLogin } : {}),
+    ...(cfg.tunnelCodeOnly ? { tunnelCodeOnly: true } : {}),
+    ...(cfg.lanCodeOnly ? { lanCodeOnly: true } : {}),
   };
   const data = JSON.stringify(persist, null, 2);
 
@@ -241,7 +247,9 @@ function upgradePasswordHash(password) {
 // TOTP, up to 30 days) can never be replayed through files.brobata.com.
 const TUNNEL_TOKEN_SCOPE = "tun";
 const TUNNEL_TOKEN_MAX_MS = 12 * 60 * 60 * 1000;
-const MAX_TOKEN_MS = 30 * 24 * 60 * 60 * 1000;
+// "Remember me" on the LAN. Long, because a LAN login needs the authenticator code
+// when lanCodeOnly is on, and tunnel sessions never get it (12h, no remember).
+const MAX_TOKEN_MS = 90 * 24 * 60 * 60 * 1000;
 
 function signToken(payload) {
   return crypto.createHmac("sha256", config.tokenSecret).update(payload).digest("hex");
@@ -787,8 +795,27 @@ function requireAuth(req, res, next) {
 app.get("/api/status", (req, res) => {
   const tunnel = isTunnelRequest(req);
   // The login form shows the code box / hides "Remember me" from these
-  res.json({ needsSetup: !isConfigured(), totpRequired: tunnel, rememberMeAllowed: !tunnel });
+  res.json({
+    needsSetup: !isConfigured(),
+    totpRequired: tunnel || !!config.lanCodeOnly,
+    rememberMeAllowed: !tunnel,
+    codeOnly: tunnel ? !!config.tunnelCodeOnly : !!config.lanCodeOnly,
+  });
 });
+
+// Wrong-code brake, on top of the 5/min limiter. Kept per source: one bucket
+// for the whole tunnel (it all arrives from 127.0.0.1) and one per LAN IP, so
+// a device at home can't lock the owner out of files.brobata.com. 10 wrong
+// codes in a row lock that source; each repeat lock is longer, and the
+// level only resets on a successful login from it.
+const CODE_FAIL_LIMIT = 10;
+const CODE_LOCK_STEPS_MS = [15, 60, 240, 1440].map((m) => m * 60 * 1000);
+const codeBrakes = new Map(); // source -> { failures, level, lockedUntil }
+
+function codeBrake(source) {
+  if (!codeBrakes.has(source)) codeBrakes.set(source, { failures: 0, level: 0, lockedUntil: 0 });
+  return codeBrakes.get(source);
+}
 
 // Setup endpoint - first-run configuration
 app.post("/api/setup", rateLimit, (req, res) => {
@@ -837,8 +864,17 @@ app.post("/api/auth", rateLimit, (req, res) => {
   // Via tunnel: never a 30-day cookie on a shared laptop
   const rememberMe = !tunnel && !!req.body.rememberMe;
 
+  // Code-only (set-password.js --code-only / --tunnel --code-only): the
+  // authenticator code is the whole login. Through the tunnel the Access email
+  // code is the other half; on the LAN, being on the home network is.
+  const codeOnly = tunnel ? !!config.tunnelCodeOnly : !!config.lanCodeOnly;
+  const needsCode = tunnel || codeOnly;
   let totpStep = null;
-  if (tunnel) {
+  const brake = needsCode ? codeBrake(tunnel ? "tunnel" : req.ip) : null;
+  if (needsCode) {
+    if (Date.now() < brake.lockedUntil) {
+      return res.status(429).json({ error: "Too many wrong codes. Try again in a few minutes." });
+    }
     // Fail closed: internet logins need a second factor, so no secret = no login
     if (!config.totpSecret) {
       return res.status(403).json({ error: "Two-factor code is not set up on the server. Run scripts/set-totp.js on the server first." });
@@ -854,22 +890,29 @@ app.post("/api/auth", rateLimit, (req, res) => {
   // A separate tunnel-only login (scripts/set-password.js --tunnel) replaces
   // the main one through the tunnel: a copy saved in a work browser never
   // unlocks the LAN, and the main login is refused out there.
-  const tunnelLogin = tunnel ? config.tunnelLogin : null;
+  const tunnelLogin = tunnel && !codeOnly ? config.tunnelLogin : null;
   const expectedUser = ((tunnelLogin ? tunnelLogin.username : config.username) || "admin").toLowerCase();
   const userOk = typeof username === "string" && username.trim().toLowerCase() === expectedUser;
   const pw = typeof password === "string" ? password : "";
   const pwOk = tunnelLogin ? bcrypt.compareSync(pw, tunnelLogin.passwordHash) : verifyPassword(pw);
   // Always run the hash check, so a wrong username isn't faster than a wrong password
-  const passwordOk = userOk && typeof password === "string" && pwOk;
+  const passwordOk = codeOnly || (userOk && typeof password === "string" && pwOk);
 
-  if (!passwordOk || (tunnel && totpStep === null)) {
+  if (needsCode && totpStep === null && ++brake.failures >= CODE_FAIL_LIMIT) {
+    const ms = CODE_LOCK_STEPS_MS[Math.min(brake.level, CODE_LOCK_STEPS_MS.length - 1)];
+    brake.failures = 0;
+    brake.level++;
+    brake.lockedUntil = Date.now() + ms;
+    console.warn(`Code logins from ${tunnel ? "the tunnel" : req.ip} locked for ${ms / 60000} minutes after repeated wrong codes (lock #${brake.level})`);
+  }
+  if (!passwordOk || (needsCode && totpStep === null)) {
     // One message for every failure: don't say which factor was wrong
-    return res.status(401).json({ error: tunnel ? "Invalid credentials or code" : "Invalid credentials" });
+    return res.status(401).json({ error: codeOnly ? "Wrong or expired code" : needsCode ? "Invalid credentials or code" : "Invalid credentials" });
   }
 
   // Burn the step only once both factors passed, so a wrong password can't use up a valid code
-  if (tunnel) lastTotpStep = totpStep;
-  if (!tunnelLogin) upgradePasswordHash(password);
+  if (needsCode) { lastTotpStep = totpStep; codeBrakes.delete(tunnel ? "tunnel" : req.ip); }
+  if (!tunnel && !codeOnly) upgradePasswordHash(password);
   const token = generateAuthToken(rememberMe, { tunnel });
   setAuthCookie(res, req, token, rememberMe);
   res.json({ ok: true });
@@ -892,7 +935,7 @@ app.post("/api/settings", requireAuth, (req, res) => {
   // and silently ignored here so a password change still works remotely.
   const { sharedDir, allowFullFilesystem } = isTunnelRequest(req) ? {} : req.body;
 
-  if (isTunnelRequest(req) && config.tunnelLogin) {
+  if (isTunnelRequest(req) && (config.tunnelLogin || config.tunnelCodeOnly)) {
     return res.status(403).json({ error: "This login is managed on the server (scripts/set-password.js --tunnel)" });
   }
   if (!currentPassword || !verifyPassword(currentPassword)) {
@@ -1439,5 +1482,5 @@ module.exports = {
   getConfig: () => config,
   REVOKED_PATH,
   _resetRateLimitForTests: () => rateLimitMap.clear(),
-  _resetTotpReplayForTests: () => { lastTotpStep = -1; },
+  _resetTotpReplayForTests: () => { lastTotpStep = -1; codeBrakes.clear(); },
 };

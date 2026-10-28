@@ -121,7 +121,7 @@ test("tunnel requests without a valid Access JWT get 403 before anything else", 
 test("valid Access JWT (email matched case-insensitively) passes; status asks for a code", async () => {
   const res = await fetch(base + "/api/status", { headers: await tunnelHeaders() });
   assert.equal(res.status, 200);
-  assert.deepEqual(await res.json(), { needsSetup: false, totpRequired: true, rememberMeAllowed: false });
+  assert.deepEqual(await res.json(), { needsSetup: false, totpRequired: true, rememberMeAllowed: false, codeOnly: false });
   const page = await fetch(base + "/", { headers: await tunnelHeaders() });
   assert.equal(page.status, 200);
 });
@@ -202,13 +202,13 @@ test("tunnel request with no access config is refused (fail closed)", async () =
 
 test("LAN behaviour is unchanged: no code, remember-me cookie, no Secure", async () => {
   let res = await fetch(base + "/api/status");
-  assert.deepEqual(await res.json(), { needsSetup: false, totpRequired: false, rememberMeAllowed: true });
+  assert.deepEqual(await res.json(), { needsSetup: false, totpRequired: false, rememberMeAllowed: true, codeOnly: false });
 
   const { res: login, cookie } = await lanLogin(true);
   const setCookie = login.headers.get("set-cookie");
-  assert.match(setCookie, /Max-Age=2592000/);
+  assert.match(setCookie, /Max-Age=7776000/, "90 days");
   assert.doesNotMatch(setCookie, /Secure/);
-  assert.match(cookie, /^\d+\.2592000000\./, "same token format as before");
+  assert.match(cookie, /^\d+\.7776000000\./, "same token format as before, 90 days");
 
   res = await post("/api/auth", { username: "admin", password: "nope" });
   assert.equal(res.status, 401);
@@ -439,5 +439,49 @@ test("a tunnel-only login replaces the main one through the tunnel, never on the
     assert.equal(JSON.parse(fs.readFileSync(sandbox.configPath, "utf8")).tunnelLogin, undefined);
   } finally {
     delete cfg.tunnelLogin;
+  }
+});
+
+test("code-only: the code alone logs in (tunnel and LAN), wrong codes lock code logins", async () => {
+  const cfg = server.getConfig();
+  cfg.tunnelCodeOnly = true;
+  cfg.lanCodeOnly = true;
+  try {
+    server._resetTotpReplayForTests();
+    // An earlier test enrolls a new secret on disk; use whatever is live
+    const now = Date.now();
+    let st = await (await fetch(base + "/api/status")).json();
+    assert.equal(st.codeOnly, true);
+    assert.equal(st.totpRequired, true);
+    st = await (await fetch(base + "/api/status", { headers: await tunnelHeaders() })).json();
+    assert.equal(st.codeOnly, true);
+
+    // LAN: the password alone is no longer enough; the code alone is
+    let res = await post("/api/auth", { username: "admin", password: TEST_PASSWORD });
+    assert.equal(res.status, 400);
+    res = await post("/api/auth", { code: totp(cfg.totpSecret, { nowMs: now }), rememberMe: true });
+    assert.equal(res.status, 200);
+    assert.match(res.headers.get("set-cookie"), /Max-Age=7776000/);
+    // Tunnel: the next step's code alone, no remember-me
+    res = await post("/api/auth", { code: totp(cfg.totpSecret, { nowMs: now + 30000 }), rememberMe: true }, await tunnelHeaders());
+    assert.equal(res.status, 200);
+    assert.doesNotMatch(res.headers.get("set-cookie"), /Max-Age/);
+
+    // 10 wrong codes in a row close code logins for a while
+    for (let i = 0; i < 10; i++) {
+      server._resetRateLimitForTests();
+      res = await post("/api/auth", { code: "000000" });
+      assert.equal(res.status, 401);
+    }
+    server._resetRateLimitForTests();
+    res = await post("/api/auth", { code: "000000" });
+    assert.equal(res.status, 429);
+    // ...but only for that source: the tunnel isn't locked by a LAN device
+    res = await post("/api/auth", { code: "000000" }, await tunnelHeaders());
+    assert.equal(res.status, 401);
+  } finally {
+    delete cfg.tunnelCodeOnly;
+    delete cfg.lanCodeOnly;
+    server._resetTotpReplayForTests();
   }
 });

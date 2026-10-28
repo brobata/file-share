@@ -3217,12 +3217,20 @@ let lastClickIndex = -1;
 // Via the internet tunnel the server asks for a 6-digit code and never
 // issues a 30-day cookie, so the login form follows what it reports.
 let totpRequired = false;
+let codeOnly = false;
+let rememberAllowed = true;
 
 function applyLoginMode(status) {
   totpRequired = !!status.totpRequired;
+  // Code-only via the tunnel: no username/password, just the 6-digit code
+  codeOnly = !!status.codeOnly;
+  document.getElementById("authUsername").style.display = codeOnly ? "none" : "";
+  document.getElementById("authPassword").style.display = codeOnly ? "none" : "";
+  if (codeOnly) setTimeout(() => document.getElementById("authCode").focus(), 0);
   document.getElementById("authCode").style.display = totpRequired ? "" : "none";
   const rememberRow = document.getElementById("authRememberRow");
   const allowRemember = status.rememberMeAllowed !== false;
+  rememberAllowed = allowRemember;
   rememberRow.style.display = allowRemember ? "flex" : "none";
   if (!allowRemember) document.getElementById("authRemember").checked = false;
 }
@@ -3286,11 +3294,12 @@ async function submitSetup() {
 async function submitAuth() {
   const username = document.getElementById("authUsername").value;
   const password = document.getElementById("authPassword").value;
-  const rememberMe = !totpRequired && document.getElementById("authRemember").checked;
+  // The server decides where remembering is allowed (never via the tunnel)
+  const rememberMe = rememberAllowed && document.getElementById("authRemember").checked;
   const codeEl = document.getElementById("authCode");
   const errorEl = document.getElementById("authError");
 
-  const body = { username, password, rememberMe };
+  const body = codeOnly ? { rememberMe } : { username, password, rememberMe };
   if (totpRequired) body.code = codeEl.value.replace(/\s+/g, "");
 
   try {
@@ -3310,7 +3319,7 @@ async function submitAuth() {
       errorEl.classList.add("visible");
       // A code is single-use, so clear it with the password; a missing code just needs typing
       codeEl.value = "";
-      if (err && err.totpRequired && password) {
+      if (codeOnly || (err && err.totpRequired && password)) {
         codeEl.focus();
       } else {
         document.getElementById("authPassword").value = "";
