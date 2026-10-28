@@ -349,9 +349,12 @@ test("tunnel file responses are not cacheable; tunnel sessions stay inside the s
   assert.equal(fs.readFileSync(outside, "utf8"), "LAN EDIT");
   const form = new FormData();
   form.append("files", new Blob(["up"]), "lan-upload.txt");
+  // Many files: later multer callbacks run outside the request's async context
+  for (let i = 0; i < 50; i++) form.append("files", new Blob(["x".repeat(20000)]), `bulk-${i}.txt`);
   res = await fetch(base + "/api/upload?path=" + encodeURIComponent(sandbox.root), { method: "POST", headers: { cookie: `auth=${lanCookie}` }, body: form });
   assert.equal(res.status, 200, await res.text());
   assert.equal(fs.readFileSync(path.join(sandbox.root, "lan-upload.txt"), "utf8"), "up");
+  assert.ok(fs.existsSync(path.join(sandbox.root, "bulk-49.txt")));
 });
 
 test("saving settings keeps totpSecret + access in config.json and writes it 0600", async () => {

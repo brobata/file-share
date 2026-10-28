@@ -81,6 +81,14 @@ test("full-filesystem mode is LAN-only: tunnel (or no request context) stays in 
   assert.throws(() => tun(() => server.safePath(outside)), /Access denied/);
   assert.throws(() => tun(() => server.safePath("/etc/hostname")), /Access denied/);
   assert.throws(() => server.safePath(outside), /Access denied/, "lost context fails closed");
+  // A link inside the shared folder pointing out of it doesn't carry a jailed
+  // session out — existing target or not — but still works on the LAN
+  const outDir = sandbox.dataDir + "-escape";
+  fs.mkdirSync(outDir, { recursive: true });
+  fs.symlinkSync(outDir, path.join(F, "escape"));
+  assert.throws(() => tun(() => server.safePath(path.join(F, "escape", "bin", "evil"))), /Access denied/);
+  assert.throws(() => tun(() => server.safePath(path.join(F, "escape"))), /Access denied/);
+  assert.equal(lan(() => server.safePath(path.join(F, "escape", "x"))), path.join(F, "escape", "x"));
   // Inside sharedDir still works via the tunnel
   assert.equal(tun(() => server.safePath(path.join(F, "project", "notes.txt"))), path.join(F, "project", "notes.txt"));
 });

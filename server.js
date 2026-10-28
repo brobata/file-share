@@ -37,8 +37,7 @@ app.use((req, _res, next) => requestCtx.run({ tunnel: isTunnelRequest(req) }, ne
 /** Full-filesystem mode applies to LAN/tailnet only. Through the tunnel every
  *  path stays inside sharedDir: writing ~/bin, a project's code or a pm2 app
  *  would be a shell on this box for whoever holds a stolen session. */
-function fullFsAllowed() {
-  const ctx = requestCtx.getStore();
+function fullFsAllowed(ctx = requestCtx.getStore()) {
   return config.allowFullFilesystem && !!ctx && !ctx.tunnel;
 }
 
@@ -537,11 +536,13 @@ function isForbiddenPath(p) {
   return hasHiddenSegment(p) || PROTECTED_DIRS.some((dir) => isUnder(p, dir));
 }
 
-function safePath(requestedPath) {
+// `req` is passed where the async context can be lost (multer's busboy
+// callbacks fire outside it after the first chunk).
+function safePath(requestedPath, req) {
   if (requestedPath !== undefined && requestedPath !== null && typeof requestedPath !== "string") {
     throw new Error("Invalid path");
   }
-  const fullFs = fullFsAllowed();
+  const fullFs = fullFsAllowed(req ? { tunnel: isTunnelRequest(req) } : undefined);
   const resolved = path.resolve(
     fullFs ? "/" : config.sharedDir,
     requestedPath || (fullFs ? "/" : "")
@@ -576,6 +577,14 @@ function safePath(requestedPath) {
   // /home/user/shared-private slip past a /home/user/shared jail
   const base = path.resolve(config.sharedDir);
   if (resolved !== base && !resolved.startsWith(base + path.sep)) {
+    throw new Error("Access denied");
+  }
+  // ...and where it really leads: a symlink inside the shared folder that
+  // points out of it (made on the LAN, or a relative link moved up a level)
+  // must not carry a jailed session out.
+  let realBase = base;
+  try { realBase = fsSync.realpathSync(base); } catch { /* missing: compare as-is */ }
+  if (!isUnder(real, realBase) && !isUnder(real, base)) {
     throw new Error("Access denied");
   }
   return resolved;
@@ -705,12 +714,12 @@ async function getFolderTree(dirPath) {
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     try {
-      const basePath = safePath(req.query.path || "");
+      const basePath = safePath(req.query.path || "", req);
       const { dir, base } = sanitizeRelativePath(file.originalname);
       // Refuse a hidden final target before creating any folders for it
-      safePath(path.join(basePath, dir, base));
+      safePath(path.join(basePath, dir, base), req);
       if (!dir) return cb(null, basePath);
-      const dest = safePath(path.join(basePath, dir));
+      const dest = safePath(path.join(basePath, dir), req);
       fs.mkdir(dest, { recursive: true })
         .then(() => cb(null, dest))
         .catch(() => cb(new Error("Failed to create upload directory")));
@@ -721,12 +730,12 @@ const storage = multer.diskStorage({
   filename: (req, file, cb) => {
     try {
       const { dir, base } = sanitizeRelativePath(file.originalname);
-      const basePath = safePath(req.query.path || "");
-      const destDir = dir ? safePath(path.join(basePath, dir)) : basePath;
+      const basePath = safePath(req.query.path || "", req);
+      const destDir = dir ? safePath(path.join(basePath, dir), req) : basePath;
       // "Keep both": append (1), (2)... instead of overwriting
       const name = req.query.mode === "rename" ? uniqueFilename(destDir, base) : base;
       // Check the final target too: an upload named ".bashrc" into ~ must fail
-      safePath(path.join(destDir, name));
+      safePath(path.join(destDir, name), req);
       cb(null, name);
     } catch {
       cb(new Error("Invalid filename"));
