@@ -332,3 +332,35 @@ test("saving settings keeps totpSecret + access in config.json and writes it 060
   assert.equal(saved.totpSecret, TOTP_SECRET);
   assert.equal(saved.access.aud, TEST_AUD);
 });
+
+test("the config dir can't be read or written through the API", async () => {
+  const { cookie } = await lanLogin();
+  const h = { cookie: `auth=${cookie}` };
+  const before = fs.readFileSync(sandbox.configPath, "utf8");
+  for (const url of [
+    "/files" + sandbox.configPath,
+    "/api/download?path=" + encodeURIComponent(sandbox.configPath),
+    "/api/list?path=" + encodeURIComponent(sandbox.dataDir),
+  ]) {
+    const res = await fetch(base + url, { headers: h });
+    assert.equal(res.status, 400, url);
+  }
+  let res = await post("/api/save", { path: sandbox.configPath, content: "{}" }, h);
+  assert.equal(res.status, 400);
+  res = await post("/api/save", { path: path.join(sandbox.dataDir, "revoked.json"), content: "{}" }, h);
+  assert.equal(res.status, 400);
+  assert.equal(fs.readFileSync(sandbox.configPath, "utf8"), before);
+});
+
+test("a TOTP secret enrolled on disk while running survives a settings save", async () => {
+  // Simulates scripts/set-totp.js writing the file before pm2 restart
+  const enrolled = base32Encode(Buffer.from("newly-enrolled-key!!"));
+  const onDisk = JSON.parse(fs.readFileSync(sandbox.configPath, "utf8"));
+  onDisk.totpSecret = enrolled;
+  fs.writeFileSync(sandbox.configPath, JSON.stringify(onDisk));
+  const { cookie } = await lanLogin();
+  const res = await post("/api/settings", { currentPassword: TEST_PASSWORD }, { cookie: `auth=${cookie}` });
+  assert.equal(res.status, 200);
+  assert.equal(JSON.parse(fs.readFileSync(sandbox.configPath, "utf8")).totpSecret, enrolled);
+  assert.equal(server.getConfig().totpSecret, enrolled, "adopted in memory too");
+});

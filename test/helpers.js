@@ -28,6 +28,10 @@ function makeSandbox({ totpSecret, access = true } = {}) {
   fs.writeFileSync(path.join(filesDir, ".bashrc"), "ORIGINAL");
   // A symlink with an innocent name pointing into a hidden dir
   fs.symlinkSync(path.join(filesDir, ".ssh"), path.join(filesDir, "keys"));
+  // A dangling one: its target doesn't exist yet, but a write would create it
+  fs.symlinkSync(path.join(filesDir, ".ssh", "authorized_keys2"), path.join(filesDir, "notes2.txt"));
+  // A dangling chain through a relative link
+  fs.symlinkSync("notes2.txt", path.join(filesDir, "notes3.txt"));
 
   const config = {
     port: 0,
@@ -43,6 +47,7 @@ function makeSandbox({ totpSecret, access = true } = {}) {
   const configPath = path.join(dataDir, "config.json");
   fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
 
+  process.env.NODE_ENV = "test"; // lets FILESHARE_ACCESS_JWKS_URL take effect
   process.env.FILESHARE_CONFIG_PATH = configPath;
   process.env.SHARED_DIR = filesDir;
   delete process.env.PORT;

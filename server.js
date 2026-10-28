@@ -153,6 +153,15 @@ function saveConfig(cfg) {
   if (!fsSync.existsSync(dir)) {
     fsSync.mkdirSync(dir, { recursive: true });
   }
+  // The server never changes totpSecret or access; scripts/set-totp.js and
+  // hand edits do, possibly while this process runs with an older copy in
+  // memory. The file wins, so a settings save before the restart can't wipe
+  // (or roll back) a fresh enrollment. Adopt it in memory too.
+  try {
+    const onDisk = JSON.parse(fsSync.readFileSync(CONFIG_PATH, "utf8"));
+    if (onDisk.totpSecret) cfg.totpSecret = onDisk.totpSecret;
+    if (onDisk.access) cfg.access = onDisk.access;
+  } catch {}
   const persist = {
     port: cfg.port,
     username: cfg.username,
@@ -466,23 +475,52 @@ function hasHiddenSegment(p) {
   return p.split(/[\\/]+/).some((seg) => seg.startsWith("."));
 }
 
-// The lexical check alone is beaten by a symlink (~/keys -> ~/.ssh), so also
-// check the real path of the deepest part of the path that exists.
-function realPathIsHidden(resolved) {
+// The lexical check alone is beaten by a symlink (~/keys -> ~/.ssh), so the
+// checks also run on the real path. For a path that doesn't exist yet, that's
+// the real path of the deepest existing part plus the rest. A dangling
+// symlink (~/notes -> ~/.ssh/authorized_keys2, target missing) is followed by
+// hand, since realpath can't resolve it but a write would go through it.
+// Returns null when it can't tell (loop, permission error): callers fail closed.
+const MAX_SYMLINK_HOPS = 40;
+function realTarget(resolved, hops = 0) {
+  if (hops > MAX_SYMLINK_HOPS) return null;
   let current = resolved;
   const tail = [];
   for (;;) {
     try {
-      const real = fsSync.realpathSync(current);
-      return hasHiddenSegment(path.join(real, ...tail));
+      return path.join(fsSync.realpathSync(current), ...tail);
     } catch (err) {
-      if (err.code !== "ENOENT" && err.code !== "ENOTDIR") return true; // can't tell: fail closed
+      if (err.code !== "ENOENT" && err.code !== "ENOTDIR") return null;
+      let st = null;
+      try { st = fsSync.lstatSync(current); } catch {}
+      if (st && st.isSymbolicLink()) {
+        const target = path.resolve(path.dirname(current), fsSync.readlinkSync(current));
+        return realTarget(path.join(target, ...tail), hops + 1);
+      }
       const parent = path.dirname(current);
-      if (parent === current) return false;
+      if (parent === current) return path.join(current, ...tail);
       tail.unshift(path.basename(current));
       current = parent;
     }
   }
+}
+
+function isUnder(p, dir) {
+  return p === dir || p.startsWith(dir + path.sep);
+}
+
+// The app's own folder (code + data/) is off limits too: data/config.json
+// holds the TOTP secret, token secret and password hash, and rewriting
+// server.js or revoked.json would undo every other guard.
+const PROTECTED_DIRS = [...new Set(
+  [__dirname, path.dirname(CONFIG_PATH)].flatMap((d) => {
+    const abs = path.resolve(d);
+    try { return [abs, fsSync.realpathSync(abs)]; } catch { return [abs]; }
+  })
+)];
+
+function isForbiddenPath(p) {
+  return hasHiddenSegment(p) || PROTECTED_DIRS.some((dir) => isUnder(p, dir));
 }
 
 function safePath(requestedPath) {
@@ -498,7 +536,11 @@ function safePath(requestedPath) {
     throw new Error("Invalid path");
   }
 
-  if (hasHiddenSegment(resolved) || realPathIsHidden(resolved)) {
+  if (isForbiddenPath(resolved)) {
+    throw new Error("Access denied");
+  }
+  const real = realTarget(resolved);
+  if (real === null || isForbiddenPath(real)) {
     throw new Error("Access denied");
   }
 
@@ -1237,7 +1279,8 @@ app.get("/api/properties", requireAuth, async (req, res) => {
             } else {
               fileCount++;
               try {
-                const s = await fs.stat(full);
+                // lstat: a symlink into a hidden folder must not reveal its target's size
+                const s = await fs.lstat(full);
                 totalSize += s.size;
               } catch {}
             }

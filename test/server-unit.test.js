@@ -45,6 +45,33 @@ test("safePath refuses a symlink that leads into a hidden dir", () => {
   assert.throws(() => server.safePath(path.join(F, "keys", "new-file")), /Access denied/);
 });
 
+test("safePath refuses dangling symlinks whose target would be hidden", () => {
+  assert.throws(() => server.safePath(path.join(F, "notes2.txt")), /Access denied/);
+  assert.throws(() => server.safePath(path.join(F, "notes3.txt")), /Access denied/, "chain of links");
+});
+
+test("safePath refuses symlink loops (can't tell = deny)", () => {
+  const a = path.join(F, "loop-a");
+  const b = path.join(F, "loop-b");
+  fs.symlinkSync(b, a);
+  fs.symlinkSync(a, b);
+  assert.throws(() => server.safePath(a), /Access denied/);
+});
+
+test("safePath refuses the app's own folder and its config dir", () => {
+  const appDir = path.resolve(__dirname, "..");
+  assert.throws(() => server.safePath(path.join(appDir, "server.js")), /Access denied/);
+  assert.throws(() => server.safePath(appDir), /Access denied/);
+  assert.throws(() => server.safePath(sandbox.configPath), /Access denied/);
+  assert.throws(() => server.safePath(path.join(sandbox.dataDir, "revoked.json")), /Access denied/);
+  // A symlink pointing at the config dir is refused too
+  const link = path.join(F, "cfg-link");
+  fs.symlinkSync(sandbox.dataDir, link);
+  assert.throws(() => server.safePath(path.join(link, "config.json")), /Access denied/);
+  // Siblings with a shared prefix are not caught by mistake
+  assert.equal(server.safePath(sandbox.dataDir + "-other"), sandbox.dataDir + "-other");
+});
+
 test("safePath still allows normal paths, existing or not", () => {
   assert.equal(server.safePath(path.join(F, "project", "notes.txt")), path.join(F, "project", "notes.txt"));
   assert.equal(server.safePath(path.join(F, "project")), path.join(F, "project"));
