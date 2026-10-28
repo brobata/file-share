@@ -4,9 +4,13 @@
  * @description Reset the File-Share password from a terminal on the server.
  *   Prompts twice without echo, bcrypt-hashes it (same rounds as the app) and
  *   writes data/config.json (old copy kept as .bak). The token secret is left
- *   alone, so browsers that are already signed in stay signed in. Restart
- *   afterwards: `pm2 restart file-share`.
+ *   alone, so browsers that are already signed in stay signed in.
+ *   `--tunnel` sets a separate username + password for files.brobata.com only
+ *   (safe to let a work browser save: it never unlocks the LAN, and the
+ *   authenticator code is still required); `--tunnel --remove` goes back to
+ *   the main login there. Restart afterwards: `pm2 restart file-share`.
  */
+const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 const readline = require("readline");
@@ -21,6 +25,13 @@ if (!process.stdin.isTTY) {
   process.exit(1);
 }
 
+function askVisible(prompt) {
+  return new Promise((resolve) => {
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    rl.question(prompt, (answer) => { rl.close(); resolve(answer.trim()); });
+  });
+}
+
 function ask(prompt) {
   return new Promise((resolve) => {
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: true });
@@ -29,11 +40,46 @@ function ask(prompt) {
   });
 }
 
+// Same check as the server: bcrypt, or the legacy salted SHA-256
+function matchesMain(config, password) {
+  if (!config.passwordHash) return false;
+  if (config.passwordHash.startsWith("$2")) return bcrypt.compareSync(password, config.passwordHash);
+  const hash = crypto.createHash("sha256").update(password + config.salt).digest("hex");
+  return hash === config.passwordHash;
+}
+
+function save(config) {
+  // Holds the hash and the cookie-signing secret: owner-only.
+  fs.copyFileSync(CONFIG_PATH, CONFIG_PATH + ".bak");
+  fs.chmodSync(CONFIG_PATH + ".bak", 0o600);
+  const tmp = CONFIG_PATH + ".tmp";
+  fs.writeFileSync(tmp, JSON.stringify(config, null, 2), { mode: 0o600 });
+  fs.renameSync(tmp, CONFIG_PATH);
+}
+
 (async () => {
   const config = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8"));
-  console.log(`File-Share username: ${config.username || "admin"}`);
+  const tunnel = process.argv.includes("--tunnel");
+  if (process.argv.includes("--remove") && !tunnel) {
+    console.error("--remove only works with --tunnel. Nothing changed.");
+    process.exit(1);
+  }
 
-  const first = await ask("New File-Share password: ");
+  if (tunnel && process.argv.includes("--remove")) {
+    delete config.tunnelLogin;
+    save(config);
+    console.log("files.brobata.com uses the main login again. Now run:  pm2 restart file-share");
+    return;
+  }
+  let tunnelUser = null;
+  if (tunnel) {
+    tunnelUser = (await askVisible("Username for files.brobata.com (e.g. your work email): ")).toLowerCase();
+    if (!tunnelUser) { console.error("A username is required. Nothing changed."); process.exit(1); }
+  } else {
+    console.log(`File-Share username: ${config.username || "admin"}`);
+  }
+
+  const first = await ask(tunnel ? "New files.brobata.com password: " : "New File-Share password: ");
   if (first.length < MIN_PASSWORD_LENGTH) {
     console.error(`Password must be at least ${MIN_PASSWORD_LENGTH} characters. Nothing changed.`);
     process.exit(1);
@@ -43,16 +89,27 @@ function ask(prompt) {
     process.exit(1);
   }
 
-  config.passwordHash = bcrypt.hashSync(first, BCRYPT_ROUNDS);
-  config.salt = "bcrypt";
-
-  // Holds the hash and the cookie-signing secret: owner-only.
-  fs.copyFileSync(CONFIG_PATH, CONFIG_PATH + ".bak");
-  fs.chmodSync(CONFIG_PATH + ".bak", 0o600);
-  const tmp = CONFIG_PATH + ".tmp";
-  fs.writeFileSync(tmp, JSON.stringify(config, null, 2), { mode: 0o600 });
-  fs.renameSync(tmp, CONFIG_PATH);
+  if (tunnel) {
+    if (matchesMain(config, first)) {
+      console.error("That is your main File-Share password. Pick a different one. Nothing changed.");
+      process.exit(1);
+    }
+    config.tunnelLogin = { username: tunnelUser, passwordHash: bcrypt.hashSync(first, BCRYPT_ROUNDS) };
+    // Cookies are stateless: a new secret is the only way to end a session
+    // still open on a lost laptop. (Signs out LAN browsers too.)
+    config.tokenSecret = crypto.randomBytes(32).toString("hex");
+  } else {
+    if (config.tunnelLogin && bcrypt.compareSync(first, config.tunnelLogin.passwordHash)) {
+      console.error("That is your files.brobata.com password. Pick a different one. Nothing changed.");
+      process.exit(1);
+    }
+    config.passwordHash = bcrypt.hashSync(first, BCRYPT_ROUNDS);
+    config.salt = "bcrypt";
+  }
+  save(config);
 
   console.log("Password saved. Now run:  pm2 restart file-share");
-  console.log("(Browsers already signed in stay signed in.)");
+  console.log(tunnel
+    ? "(Only files.brobata.com uses it; the main login stops working there. Every browser is signed out, home ones too.)"
+    : "(Browsers already signed in stay signed in.)");
 })();

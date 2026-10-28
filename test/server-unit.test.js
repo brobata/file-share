@@ -147,11 +147,11 @@ test("LAN tokens validate, are refused via tunnel, and die on revocation", () =>
   assert.ok(saved[token.split(".").pop()] > Date.now());
 });
 
-test("tunnel tokens are tun-scoped, valid on both, and revocable", () => {
+test("tunnel tokens are tun-scoped, valid only via the tunnel, and revocable", () => {
   const token = server.generateAuthToken(true, { tunnel: true });
   assert.match(token, /^tun\.\d+\.43200000\.[0-9a-f]{64}$/, "12h regardless of rememberMe");
   assert.equal(server.validateAuthToken(token, { tunnel: true }), true);
-  assert.equal(server.validateAuthToken(token), true);
+  assert.equal(server.validateAuthToken(token), false, "a copied tunnel cookie never gets LAN access");
   server.revokeAuthToken(token);
   assert.equal(server.validateAuthToken(token, { tunnel: true }), false);
 });

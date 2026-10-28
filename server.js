@@ -174,6 +174,10 @@ function saveConfig(cfg) {
     const onDisk = JSON.parse(fsSync.readFileSync(CONFIG_PATH, "utf8"));
     if (onDisk.totpSecret) cfg.totpSecret = onDisk.totpSecret;
     if (onDisk.access) cfg.access = onDisk.access;
+    // Owned by set-password.js --tunnel: mirror the file exactly (set,
+    // changed or removed), so a save here never brings back a removed login
+    if (onDisk.tunnelLogin) cfg.tunnelLogin = onDisk.tunnelLogin;
+    else delete cfg.tunnelLogin;
   } catch {}
   const persist = {
     port: cfg.port,
@@ -186,6 +190,7 @@ function saveConfig(cfg) {
     // Only written when set, so an un-enrolled config stays as it was
     ...(cfg.totpSecret ? { totpSecret: cfg.totpSecret } : {}),
     ...(cfg.access ? { access: cfg.access } : {}),
+    ...(cfg.tunnelLogin ? { tunnelLogin: cfg.tunnelLogin } : {}),
   };
   const data = JSON.stringify(persist, null, 2);
 
@@ -282,7 +287,9 @@ function parseAuthToken(token) {
 function validateAuthToken(token, { tunnel = false } = {}) {
   const parsed = parseAuthToken(token);
   if (!parsed) return false;
-  if (tunnel && !parsed.tunnel) return false;
+  // A cookie only works where it was issued: a LAN cookie can't be replayed
+  // through the tunnel, and a copied tunnel cookie never gets LAN (full-fs) access.
+  if (tunnel !== parsed.tunnel) return false;
   return !isTokenRevoked(parsed.hmac);
 }
 
@@ -844,9 +851,16 @@ app.post("/api/auth", rateLimit, (req, res) => {
     totpStep = verifyTotp(config.totpSecret, code, { lastStep: lastTotpStep });
   }
 
-  const expectedUser = (config.username || "admin").toLowerCase();
+  // A separate tunnel-only login (scripts/set-password.js --tunnel) replaces
+  // the main one through the tunnel: a copy saved in a work browser never
+  // unlocks the LAN, and the main login is refused out there.
+  const tunnelLogin = tunnel ? config.tunnelLogin : null;
+  const expectedUser = ((tunnelLogin ? tunnelLogin.username : config.username) || "admin").toLowerCase();
   const userOk = typeof username === "string" && username.trim().toLowerCase() === expectedUser;
-  const passwordOk = userOk && typeof password === "string" && verifyPassword(password);
+  const pw = typeof password === "string" ? password : "";
+  const pwOk = tunnelLogin ? bcrypt.compareSync(pw, tunnelLogin.passwordHash) : verifyPassword(pw);
+  // Always run the hash check, so a wrong username isn't faster than a wrong password
+  const passwordOk = userOk && typeof password === "string" && pwOk;
 
   if (!passwordOk || (tunnel && totpStep === null)) {
     // One message for every failure: don't say which factor was wrong
@@ -855,15 +869,16 @@ app.post("/api/auth", rateLimit, (req, res) => {
 
   // Burn the step only once both factors passed, so a wrong password can't use up a valid code
   if (tunnel) lastTotpStep = totpStep;
-  upgradePasswordHash(password);
+  if (!tunnelLogin) upgradePasswordHash(password);
   const token = generateAuthToken(rememberMe, { tunnel });
   setAuthCookie(res, req, token, rememberMe);
   res.json({ ok: true });
 });
 
-app.get("/api/settings", requireAuth, (_req, res) => {
+app.get("/api/settings", requireAuth, (req, res) => {
+  const tunnelLogin = isTunnelRequest(req) ? config.tunnelLogin : null;
   res.json({
-    username: config.username || "admin",
+    username: (tunnelLogin ? tunnelLogin.username : config.username) || "admin",
     sharedDir: config.sharedDir,
     // What this session can do: tunnel sessions are always jailed
     allowFullFilesystem: fullFsAllowed(),
@@ -877,6 +892,9 @@ app.post("/api/settings", requireAuth, (req, res) => {
   // and silently ignored here so a password change still works remotely.
   const { sharedDir, allowFullFilesystem } = isTunnelRequest(req) ? {} : req.body;
 
+  if (isTunnelRequest(req) && config.tunnelLogin) {
+    return res.status(403).json({ error: "This login is managed on the server (scripts/set-password.js --tunnel)" });
+  }
   if (!currentPassword || !verifyPassword(currentPassword)) {
     return res.status(401).json({ error: "Current password is incorrect" });
   }
@@ -888,6 +906,10 @@ app.post("/api/settings", requireAuth, (req, res) => {
   if (newPassword) {
     if (newPassword.length < MIN_PASSWORD_LENGTH) {
       return res.status(400).json({ error: `Password must be at least ${MIN_PASSWORD_LENGTH} characters` });
+    }
+    // The work-laptop password must never also unlock the LAN
+    if (config.tunnelLogin && bcrypt.compareSync(newPassword, config.tunnelLogin.passwordHash)) {
+      return res.status(400).json({ error: "That is your files.brobata.com password. Pick a different one." });
     }
     config.passwordHash = bcrypt.hashSync(newPassword, BCRYPT_ROUNDS);
     config.salt = "bcrypt";
@@ -1417,4 +1439,5 @@ module.exports = {
   getConfig: () => config,
   REVOKED_PATH,
   _resetRateLimitForTests: () => rateLimitMap.clear(),
+  _resetTotpReplayForTests: () => { lastTotpStep = -1; },
 };

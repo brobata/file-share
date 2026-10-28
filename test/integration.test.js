@@ -400,3 +400,44 @@ test("a TOTP secret enrolled on disk while running survives a settings save", as
   assert.equal(JSON.parse(fs.readFileSync(sandbox.configPath, "utf8")).totpSecret, enrolled);
   assert.equal(server.getConfig().totpSecret, enrolled, "adopted in memory too");
 });
+
+test("a tunnel-only login replaces the main one through the tunnel, never on the LAN", async () => {
+  const bcrypt = require("bcryptjs");
+  const cfg = server.getConfig();
+  cfg.tunnelLogin = { username: "me@work.example", passwordHash: bcrypt.hashSync("laptop-pass-1", 4) };
+  try {
+    server._resetTotpReplayForTests();
+    // An earlier test enrolls a new secret on disk; use whatever is live
+    const code = totp(cfg.totpSecret, { nowMs: Date.now() });
+    // Main login refused out there (and the code isn't burned by it)
+    let res = await post("/api/auth", { username: "admin", password: TEST_PASSWORD, code }, await tunnelHeaders());
+    assert.equal(res.status, 401);
+    // Tunnel login without a code: still refused
+    res = await post("/api/auth", { username: "Me@Work.example", password: "laptop-pass-1" }, await tunnelHeaders());
+    assert.equal(res.status, 400);
+    res = await post("/api/auth", { username: "Me@Work.example", password: "laptop-pass-1", code }, await tunnelHeaders());
+    assert.equal(res.status, 200);
+    const cookie = cookieFrom(res);
+    const s = await (await fetch(base + "/api/settings", { headers: await tunnelHeaders({ cookie: `auth=${cookie}` }) })).json();
+    assert.equal(s.username, "me@work.example");
+    // Can't change logins from out there
+    res = await post("/api/settings", { currentPassword: "laptop-pass-1", newPassword: "x".repeat(12) }, await tunnelHeaders({ cookie: `auth=${cookie}` }));
+    assert.equal(res.status, 403);
+    // The LAN never accepts the tunnel login, and still takes the main one
+    res = await post("/api/auth", { username: "me@work.example", password: "laptop-pass-1" });
+    assert.equal(res.status, 401);
+    const { cookie: lan } = await lanLogin();
+    assert.ok(bcrypt.compareSync(TEST_PASSWORD, cfg.passwordHash), "main hash untouched");
+    // The home password can't be changed to the laptop one
+    res = await post("/api/settings", { currentPassword: TEST_PASSWORD, newPassword: "laptop-pass-1" }, { cookie: `auth=${lan}` });
+    assert.equal(res.status, 400);
+    // The file owns tunnelLogin: removed on disk (set-password --tunnel --remove)
+    // means a save here drops it too, instead of writing the old copy back
+    res = await post("/api/settings", { currentPassword: TEST_PASSWORD }, { cookie: `auth=${lan}` });
+    assert.equal(res.status, 200);
+    assert.equal(cfg.tunnelLogin, undefined);
+    assert.equal(JSON.parse(fs.readFileSync(sandbox.configPath, "utf8")).tunnelLogin, undefined);
+  } finally {
+    delete cfg.tunnelLogin;
+  }
+});
