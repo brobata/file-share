@@ -5,6 +5,7 @@ const fs = require("fs/promises");
 const fsSync = require("fs");
 const os = require("os");
 const crypto = require("crypto");
+const { AsyncLocalStorage } = require("async_hooks");
 const archiver = require("archiver");
 const bcrypt = require("bcryptjs");
 const compression = require("compression");
@@ -26,6 +27,19 @@ function isTunnelRequest(req) {
   const host = String(h.host || "").toLowerCase().replace(/:\d+$/, "");
   req._viaTunnel = !!(h["cf-connecting-ip"] || h["cf-access-jwt-assertion"] || TUNNEL_HOSTS.has(host));
   return req._viaTunnel;
+}
+
+// Per-request "came through the tunnel" flag for code that never sees req
+// (safePath). Lost context reads as tunnel: stricter, never looser.
+const requestCtx = new AsyncLocalStorage();
+app.use((req, _res, next) => requestCtx.run({ tunnel: isTunnelRequest(req) }, next));
+
+/** Full-filesystem mode applies to LAN/tailnet only. Through the tunnel every
+ *  path stays inside sharedDir: writing ~/bin, a project's code or a pm2 app
+ *  would be a shell on this box for whoever holds a stolen session. */
+function fullFsAllowed() {
+  const ctx = requestCtx.getStore();
+  return config.allowFullFilesystem && !!ctx && !ctx.tunnel;
 }
 
 // Runs before everything else (static files included): a tunnel request
@@ -527,9 +541,10 @@ function safePath(requestedPath) {
   if (requestedPath !== undefined && requestedPath !== null && typeof requestedPath !== "string") {
     throw new Error("Invalid path");
   }
+  const fullFs = fullFsAllowed();
   const resolved = path.resolve(
-    config.allowFullFilesystem ? "/" : config.sharedDir,
-    requestedPath || (config.allowFullFilesystem ? "/" : "")
+    fullFs ? "/" : config.sharedDir,
+    requestedPath || (fullFs ? "/" : "")
   );
 
   if (resolved.includes("\0")) {
@@ -544,7 +559,7 @@ function safePath(requestedPath) {
     throw new Error("Access denied");
   }
 
-  if (config.allowFullFilesystem) {
+  if (fullFs) {
     // Deny access to sensitive system files even in full-fs mode
     for (const denied of DENIED_PATHS) {
       if (resolved === denied) throw new Error("Access denied");
@@ -841,12 +856,17 @@ app.get("/api/settings", requireAuth, (_req, res) => {
   res.json({
     username: config.username || "admin",
     sharedDir: config.sharedDir,
-    allowFullFilesystem: config.allowFullFilesystem,
+    // What this session can do: tunnel sessions are always jailed
+    allowFullFilesystem: fullFsAllowed(),
   });
 });
 
 app.post("/api/settings", requireAuth, (req, res) => {
-  const { currentPassword, newPassword, newUsername, sharedDir, allowFullFilesystem } = req.body;
+  const { currentPassword, newPassword, newUsername } = req.body;
+  // Moving the jail (sharedDir: "/") or turning on full access from the
+  // internet would undo the tunnel restriction: those are LAN/tailnet only,
+  // and silently ignored here so a password change still works remotely.
+  const { sharedDir, allowFullFilesystem } = isTunnelRequest(req) ? {} : req.body;
 
   if (!currentPassword || !verifyPassword(currentPassword)) {
     return res.status(401).json({ error: "Current password is incorrect" });
@@ -961,7 +981,7 @@ app.get("/api/info", requireAuth, async (req, res) => {
 
 app.get("/api/drives", requireAuth, async (_req, res) => {
   try {
-    const drives = await getMountedDrives();
+    const drives = (await getMountedDrives()).filter((d) => fullFsAllowed() || d.path === config.sharedDir);
     res.json(drives);
   } catch {
     res.status(400).json({ error: "Failed to list drives" });
@@ -1384,6 +1404,7 @@ module.exports = {
   validateAuthToken,
   revokeAuthToken,
   isTunnelRequest,
+  _withRequestContextForTests: (ctx, fn) => requestCtx.run(ctx, fn),
   getConfig: () => config,
   REVOKED_PATH,
   _resetRateLimitForTests: () => rateLimitMap.clear(),

@@ -69,7 +69,20 @@ test("safePath refuses the app's own folder and its config dir", () => {
   fs.symlinkSync(sandbox.dataDir, link);
   assert.throws(() => server.safePath(path.join(link, "config.json")), /Access denied/);
   // Siblings with a shared prefix are not caught by mistake
-  assert.equal(server.safePath(sandbox.dataDir + "-other"), sandbox.dataDir + "-other");
+  const lan = (fn) => server._withRequestContextForTests({ tunnel: false }, fn);
+  assert.equal(lan(() => server.safePath(sandbox.dataDir + "-other")), sandbox.dataDir + "-other");
+});
+
+test("full-filesystem mode is LAN-only: tunnel (or no request context) stays in sharedDir", () => {
+  const outside = sandbox.dataDir + "-other";
+  const lan = (fn) => server._withRequestContextForTests({ tunnel: false }, fn);
+  const tun = (fn) => server._withRequestContextForTests({ tunnel: true }, fn);
+  assert.equal(lan(() => server.safePath(outside)), outside);
+  assert.throws(() => tun(() => server.safePath(outside)), /Access denied/);
+  assert.throws(() => tun(() => server.safePath("/etc/hostname")), /Access denied/);
+  assert.throws(() => server.safePath(outside), /Access denied/, "lost context fails closed");
+  // Inside sharedDir still works via the tunnel
+  assert.equal(tun(() => server.safePath(path.join(F, "project", "notes.txt"))), path.join(F, "project", "notes.txt"));
 });
 
 test("safePath still allows normal paths, existing or not", () => {

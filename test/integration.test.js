@@ -311,14 +311,47 @@ test("folder ZIP download leaves hidden children out", async () => {
   assert.ok(!zip.includes(".env"), "hidden .env must not be in the zip");
 });
 
-test("tunnel file responses are not cacheable", async () => {
+test("tunnel file responses are not cacheable; tunnel sessions stay inside the shared folder", async () => {
   const code = nextCode();
   let res = await post("/api/auth", { username: "admin", password: TEST_PASSWORD, code }, await tunnelHeaders());
   assert.equal(res.status, 200);
   const cookie = cookieFrom(res);
-  res = await fetch(base + "/files" + path.join(F, "project", "notes.txt"), { headers: await tunnelHeaders({ cookie: `auth=${cookie}` }) });
+  const h = async () => tunnelHeaders({ cookie: `auth=${cookie}` });
+  res = await fetch(base + "/files" + path.join(F, "project", "notes.txt"), { headers: await h() });
   assert.equal(res.status, 200);
   assert.equal(res.headers.get("cache-control"), "private, no-store");
+
+  // Full-filesystem mode is on in the sandbox, but not for the tunnel
+  const outside = path.join(sandbox.root, "outside.txt");
+  fs.writeFileSync(outside, "ORIGINAL");
+  res = await fetch(base + "/files" + outside, { headers: await h() });
+  assert.notEqual(res.status, 200);
+  res = await post("/api/save", { path: outside, content: "PWNED" }, await h());
+  assert.notEqual(res.status, 200);
+  assert.equal(fs.readFileSync(outside, "utf8"), "ORIGINAL");
+  const drives = await (await fetch(base + "/api/drives", { headers: await h() })).json();
+  assert.ok(drives.every((d) => d.path === F), JSON.stringify(drives));
+  assert.equal((await (await fetch(base + "/api/settings", { headers: await h() })).json()).allowFullFilesystem, false);
+
+  // ...and it can't move the jail or switch full access on from outside
+  res = await post("/api/settings", { currentPassword: TEST_PASSWORD, sharedDir: "/", allowFullFilesystem: true }, await h());
+  assert.equal(res.status, 200);
+  const saved = JSON.parse(fs.readFileSync(sandbox.configPath, "utf8"));
+  assert.equal(saved.sharedDir, F);
+
+  // The same file is reachable from the LAN (full-filesystem mode)
+  const { cookie: lanCookie } = await lanLogin();
+  res = await fetch(base + "/files" + outside, { headers: { cookie: `auth=${lanCookie}` } });
+  assert.equal(res.status, 200);
+  // Body-parsed and streamed routes keep the LAN context too (save + upload)
+  res = await post("/api/save", { path: outside, content: "LAN EDIT" }, { cookie: `auth=${lanCookie}` });
+  assert.equal(res.status, 200, await res.text());
+  assert.equal(fs.readFileSync(outside, "utf8"), "LAN EDIT");
+  const form = new FormData();
+  form.append("files", new Blob(["up"]), "lan-upload.txt");
+  res = await fetch(base + "/api/upload?path=" + encodeURIComponent(sandbox.root), { method: "POST", headers: { cookie: `auth=${lanCookie}` }, body: form });
+  assert.equal(res.status, 200, await res.text());
+  assert.equal(fs.readFileSync(path.join(sandbox.root, "lan-upload.txt"), "utf8"), "up");
 });
 
 test("saving settings keeps totpSecret + access in config.json and writes it 0600", async () => {
