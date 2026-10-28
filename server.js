@@ -9,8 +9,38 @@ const archiver = require("archiver");
 const bcrypt = require("bcryptjs");
 const compression = require("compression");
 const helmet = require("helmet");
+const { verifyTotp } = require("./lib/totp");
+const { resolveAccessConfig, verifyAccessJwt } = require("./lib/access");
 
 const app = express();
+
+// --- Tunnel (files.brobata.com via Cloudflare Tunnel + Access) ---
+// cloudflared always adds cf-connecting-ip (and Access adds the JWT header);
+// LAN requests never carry them. Any one of the three marks a request as
+// "via tunnel". Spoofing them from the LAN only makes the request stricter.
+const TUNNEL_HOSTS = new Set(["files.brobata.com"]);
+
+function isTunnelRequest(req) {
+  if (req._viaTunnel !== undefined) return req._viaTunnel;
+  const h = req.headers;
+  const host = String(h.host || "").toLowerCase().replace(/:\d+$/, "");
+  req._viaTunnel = !!(h["cf-connecting-ip"] || h["cf-access-jwt-assertion"] || TUNNEL_HOSTS.has(host));
+  return req._viaTunnel;
+}
+
+// Runs before everything else (static files included): a tunnel request
+// without a valid Access assertion for an allowed email gets a bare 403.
+app.use(async (req, res, next) => {
+  if (!isTunnelRequest(req)) return next();
+  try {
+    req.accessEmail = await verifyAccessJwt(req.headers["cf-access-jwt-assertion"], resolveAccessConfig(config.access));
+  } catch (err) {
+    // Log the reason (never the token) so a misconfigured Access app is debuggable
+    console.warn(`Tunnel request rejected (${req.method} ${req.path}): ${err.code || err.message}`);
+    return res.status(403).type("text/plain").send("Forbidden");
+  }
+  next();
+});
 
 // --- Compression & Security Headers ---
 app.use(compression());
@@ -38,21 +68,28 @@ function parseCookies(cookieHeader) {
 }
 
 function setAuthCookie(res, req, token, rememberMe) {
-  const maxAge = rememberMe ? 30 * 24 * 60 * 60 : "";
-  const secure = req.secure || req.headers["x-forwarded-proto"] === "https";
+  const tunnel = isTunnelRequest(req);
+  // Via tunnel (shared laptop): session cookie only, always Secure
+  const maxAge = rememberMe && !tunnel ? 30 * 24 * 60 * 60 : "";
+  const secure = tunnel || req.secure || req.headers["x-forwarded-proto"] === "https";
   let cookie = `auth=${token}; Path=/; HttpOnly; SameSite=Strict`;
   if (secure) cookie += "; Secure";
   if (maxAge) cookie += `; Max-Age=${maxAge}`;
   res.setHeader("Set-Cookie", cookie);
 }
 
-function clearAuthCookie(res) {
-  res.setHeader("Set-Cookie", "auth=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0");
+function clearAuthCookie(res, req) {
+  const secure = isTunnelRequest(req) || req.secure || req.headers["x-forwarded-proto"] === "https";
+  res.setHeader("Set-Cookie", "auth=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0" + (secure ? "; Secure" : ""));
 }
 
 // --- Config system ---
-const CONFIG_PATH = path.join(__dirname, "data", "config.json");
+// Overridable so tests can run against a temp dir instead of the real data/
+const CONFIG_PATH = process.env.FILESHARE_CONFIG_PATH
+  ? path.resolve(process.env.FILESHARE_CONFIG_PATH)
+  : path.join(__dirname, "data", "config.json");
 const CONFIG_BACKUP_PATH = CONFIG_PATH + ".bak";
+const REVOKED_PATH = path.join(path.dirname(CONFIG_PATH), "revoked.json");
 const BCRYPT_ROUNDS = 12;
 const MIN_PASSWORD_LENGTH = 8;
 
@@ -75,8 +112,9 @@ function loadConfig() {
       try {
         const backupRaw = fsSync.readFileSync(CONFIG_BACKUP_PATH, "utf8");
         fileConfig = JSON.parse(backupRaw);
-        // Restore from backup
-        fsSync.writeFileSync(CONFIG_PATH, backupRaw);
+        // Restore from backup (holds secrets: owner-only)
+        fsSync.writeFileSync(CONFIG_PATH, backupRaw, { mode: 0o600 });
+        fsSync.chmodSync(CONFIG_PATH, 0o600);
         console.log("Restored config from backup");
       } catch {
         console.error("CRITICAL: No valid config or backup found. Starting fresh.");
@@ -123,16 +161,25 @@ function saveConfig(cfg) {
     passwordHash: cfg.passwordHash,
     salt: cfg.salt,
     tokenSecret: cfg.tokenSecret,
+    // Only written when set, so an un-enrolled config stays as it was
+    ...(cfg.totpSecret ? { totpSecret: cfg.totpSecret } : {}),
+    ...(cfg.access ? { access: cfg.access } : {}),
   };
   const data = JSON.stringify(persist, null, 2);
 
-  // Atomic write: write to temp, then rename
+  // Atomic write: write to temp, then rename. The file holds the password
+  // hash, token secret and TOTP secret, so every copy is 0600 (writeFile's
+  // mode only applies on create, hence the explicit chmod for a leftover .tmp).
   const tmpPath = CONFIG_PATH + ".tmp";
   // Backup existing config before overwriting
   if (fsSync.existsSync(CONFIG_PATH)) {
-    try { fsSync.copyFileSync(CONFIG_PATH, CONFIG_BACKUP_PATH); } catch {}
+    try {
+      fsSync.copyFileSync(CONFIG_PATH, CONFIG_BACKUP_PATH);
+      fsSync.chmodSync(CONFIG_BACKUP_PATH, 0o600);
+    } catch {}
   }
-  fsSync.writeFileSync(tmpPath, data);
+  fsSync.writeFileSync(tmpPath, data, { mode: 0o600 });
+  fsSync.chmodSync(tmpPath, 0o600);
   fsSync.renameSync(tmpPath, CONFIG_PATH);
 }
 
@@ -160,32 +207,119 @@ function upgradePasswordHash(password) {
   }
 }
 
-// Token system: HMAC-based with per-token expiry using dedicated secret
-function generateAuthToken(rememberMe) {
-  const issuedAt = Date.now().toString();
-  const expiryMs = rememberMe ? (30 * 24 * 60 * 60 * 1000).toString() : (24 * 60 * 60 * 1000).toString();
-  const payload = issuedAt + "." + expiryMs;
-  const hmac = crypto.createHmac("sha256", config.tokenSecret).update(payload).digest("hex");
-  return payload + "." + hmac;
+// Token system: HMAC-based with per-token expiry using dedicated secret.
+// LAN tokens: "issuedAt.expiryMs.hmac" (unchanged, so existing sessions survive).
+// Tunnel tokens: "tun.issuedAt.expiryMs.hmac" (the scope is covered by the HMAC).
+// Via the tunnel only tun-scoped tokens are accepted, so a LAN session (no
+// TOTP, up to 30 days) can never be replayed through files.brobata.com.
+const TUNNEL_TOKEN_SCOPE = "tun";
+const TUNNEL_TOKEN_MAX_MS = 12 * 60 * 60 * 1000;
+const MAX_TOKEN_MS = 30 * 24 * 60 * 60 * 1000;
+
+function signToken(payload) {
+  return crypto.createHmac("sha256", config.tokenSecret).update(payload).digest("hex");
 }
 
-function validateAuthToken(token) {
-  if (!token || !config.tokenSecret) return false;
-  const parts = token.split(".");
-  if (parts.length !== 3) return false;
-  const [issuedAt, expiryMs, hmac] = parts;
-  const payload = issuedAt + "." + expiryMs;
-  const expected = crypto.createHmac("sha256", config.tokenSecret).update(payload).digest("hex");
-  const hmacBuf = Buffer.from(hmac);
-  const expectedBuf = Buffer.from(expected);
-  // timingSafeEqual throws on length mismatch, which would turn a bad cookie into a 500
-  if (hmacBuf.length !== expectedBuf.length) return false;
-  if (!crypto.timingSafeEqual(hmacBuf, expectedBuf)) return false;
-  const expiry = parseInt(expiryMs, 10);
-  if (expiry > 0) {
-    const age = Date.now() - parseInt(issuedAt, 10);
-    if (age > expiry) return false;
+function generateAuthToken(rememberMe, { tunnel = false } = {}) {
+  const issuedAt = Date.now().toString();
+  if (tunnel) {
+    const payload = `${TUNNEL_TOKEN_SCOPE}.${issuedAt}.${TUNNEL_TOKEN_MAX_MS}`;
+    return payload + "." + signToken(payload);
   }
+  const expiryMs = rememberMe ? MAX_TOKEN_MS.toString() : (24 * 60 * 60 * 1000).toString();
+  const payload = issuedAt + "." + expiryMs;
+  return payload + "." + signToken(payload);
+}
+
+// Returns { hmac, expiresAt, tunnel } for a well-formed, correctly signed,
+// unexpired token, else null. Revocation is checked in validateAuthToken.
+function parseAuthToken(token) {
+  if (!token || typeof token !== "string" || !config.tokenSecret) return null;
+  const parts = token.split(".");
+  let scope = "";
+  if (parts.length === 4 && parts[0] === TUNNEL_TOKEN_SCOPE) scope = parts.shift();
+  if (parts.length !== 3) return null;
+  const [issuedAt, expiryMs, hmac] = parts;
+  const payload = (scope ? scope + "." : "") + issuedAt + "." + expiryMs;
+  const hmacBuf = Buffer.from(hmac);
+  const expectedBuf = Buffer.from(signToken(payload));
+  // timingSafeEqual throws on length mismatch, which would turn a bad cookie into a 500
+  if (hmacBuf.length !== expectedBuf.length) return null;
+  if (!crypto.timingSafeEqual(hmacBuf, expectedBuf)) return null;
+  const issued = parseInt(issuedAt, 10);
+  let expiry = parseInt(expiryMs, 10);
+  if (!Number.isFinite(issued) || !Number.isFinite(expiry)) return null;
+  // Defense in depth: a tunnel token never lives longer than 12h
+  if (scope && (expiry <= 0 || expiry > TUNNEL_TOKEN_MAX_MS)) expiry = TUNNEL_TOKEN_MAX_MS;
+  if (expiry > 0 && Date.now() - issued > expiry) return null;
+  // expiry 0 never comes from generateAuthToken; cap its revocation entry anyway
+  const expiresAt = issued + (expiry > 0 ? expiry : MAX_TOKEN_MS);
+  return { hmac, expiresAt, tunnel: !!scope };
+}
+
+function validateAuthToken(token, { tunnel = false } = {}) {
+  const parsed = parseAuthToken(token);
+  if (!parsed) return false;
+  if (tunnel && !parsed.tunnel) return false;
+  return !isTokenRevoked(parsed.hmac);
+}
+
+// Request-aware check used by every authenticated route
+function isRequestAuthed(req) {
+  const cookies = parseCookies(req.headers.cookie);
+  return validateAuthToken(cookies.auth, { tunnel: isTunnelRequest(req) });
+}
+
+// --- Token revocation (logout) ---
+// Tokens are stateless, so logout used to only clear the cookie and a copied
+// cookie stayed valid for its full life. Logout now records the token's HMAC
+// with its expiry in revoked.json (0600); expired entries are pruned on load
+// and on every write, so the file stays small.
+let revokedTokens = new Map(); // hmac -> expiresAt (ms)
+
+function loadRevokedTokens() {
+  revokedTokens = new Map();
+  try {
+    const raw = JSON.parse(fsSync.readFileSync(REVOKED_PATH, "utf8"));
+    const now = Date.now();
+    for (const [hmac, expiresAt] of Object.entries(raw || {})) {
+      if (typeof expiresAt === "number" && expiresAt > now) revokedTokens.set(hmac, expiresAt);
+    }
+  } catch (err) {
+    if (err.code !== "ENOENT") console.error("WARNING: revoked.json unreadable, starting with an empty revocation list");
+  }
+}
+
+function saveRevokedTokens() {
+  const now = Date.now();
+  for (const [hmac, expiresAt] of revokedTokens) {
+    if (expiresAt <= now) revokedTokens.delete(hmac);
+  }
+  const dir = path.dirname(REVOKED_PATH);
+  if (!fsSync.existsSync(dir)) fsSync.mkdirSync(dir, { recursive: true });
+  const tmp = REVOKED_PATH + ".tmp";
+  fsSync.writeFileSync(tmp, JSON.stringify(Object.fromEntries(revokedTokens)), { mode: 0o600 });
+  fsSync.chmodSync(tmp, 0o600);
+  fsSync.renameSync(tmp, REVOKED_PATH);
+}
+
+function isTokenRevoked(hmac) {
+  const expiresAt = revokedTokens.get(hmac);
+  if (expiresAt === undefined) return false;
+  if (expiresAt <= Date.now()) {
+    revokedTokens.delete(hmac);
+    return false;
+  }
+  return true;
+}
+
+// Only signed, unexpired tokens are recorded, so an unauthenticated caller
+// can't grow the file with junk.
+function revokeAuthToken(token) {
+  const parsed = parseAuthToken(token);
+  if (!parsed) return false;
+  revokedTokens.set(parsed.hmac, parsed.expiresAt);
+  saveRevokedTokens();
   return true;
 }
 
@@ -195,6 +329,11 @@ if (config._tokenSecretGenerated) {
   delete config._tokenSecretGenerated;
   saveConfig(config);
 }
+loadRevokedTokens();
+
+// Last accepted TOTP time step, so an observed code can't be replayed.
+// In memory is enough: a restart only reopens the current ±30s window.
+let lastTotpStep = -1;
 
 // --- Rate limiting ---
 const rateLimitMap = new Map();
@@ -320,7 +459,36 @@ function sanitizeRelativePath(name) {
 const DENIED_PATHS = ["/etc/shadow", "/etc/gshadow"];
 const DENIED_PREFIXES = ["/proc", "/sys", "/dev"];
 
+// Hidden paths (any segment starting with ".") are off limits everywhere:
+// ~/.ssh/authorized_keys, ~/.bashrc, .env, .git/hooks... A write there is a
+// shell takeover, a read leaks credentials. Applies on the LAN too.
+function hasHiddenSegment(p) {
+  return p.split(/[\\/]+/).some((seg) => seg.startsWith("."));
+}
+
+// The lexical check alone is beaten by a symlink (~/keys -> ~/.ssh), so also
+// check the real path of the deepest part of the path that exists.
+function realPathIsHidden(resolved) {
+  let current = resolved;
+  const tail = [];
+  for (;;) {
+    try {
+      const real = fsSync.realpathSync(current);
+      return hasHiddenSegment(path.join(real, ...tail));
+    } catch (err) {
+      if (err.code !== "ENOENT" && err.code !== "ENOTDIR") return true; // can't tell: fail closed
+      const parent = path.dirname(current);
+      if (parent === current) return false;
+      tail.unshift(path.basename(current));
+      current = parent;
+    }
+  }
+}
+
 function safePath(requestedPath) {
+  if (requestedPath !== undefined && requestedPath !== null && typeof requestedPath !== "string") {
+    throw new Error("Invalid path");
+  }
   const resolved = path.resolve(
     config.allowFullFilesystem ? "/" : config.sharedDir,
     requestedPath || (config.allowFullFilesystem ? "/" : "")
@@ -328,6 +496,10 @@ function safePath(requestedPath) {
 
   if (resolved.includes("\0")) {
     throw new Error("Invalid path");
+  }
+
+  if (hasHiddenSegment(resolved) || realPathIsHidden(resolved)) {
+    throw new Error("Access denied");
   }
 
   if (config.allowFullFilesystem) {
@@ -477,7 +649,9 @@ const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     try {
       const basePath = safePath(req.query.path || "");
-      const { dir } = sanitizeRelativePath(file.originalname);
+      const { dir, base } = sanitizeRelativePath(file.originalname);
+      // Refuse a hidden final target before creating any folders for it
+      safePath(path.join(basePath, dir, base));
       if (!dir) return cb(null, basePath);
       const dest = safePath(path.join(basePath, dir));
       fs.mkdir(dest, { recursive: true })
@@ -490,13 +664,13 @@ const storage = multer.diskStorage({
   filename: (req, file, cb) => {
     try {
       const { dir, base } = sanitizeRelativePath(file.originalname);
-      if (req.query.mode === "rename") {
-        // "Keep both": append (1), (2)... instead of overwriting
-        const basePath = safePath(req.query.path || "");
-        const destDir = dir ? safePath(path.join(basePath, dir)) : basePath;
-        return cb(null, uniqueFilename(destDir, base));
-      }
-      cb(null, base);
+      const basePath = safePath(req.query.path || "");
+      const destDir = dir ? safePath(path.join(basePath, dir)) : basePath;
+      // "Keep both": append (1), (2)... instead of overwriting
+      const name = req.query.mode === "rename" ? uniqueFilename(destDir, base) : base;
+      // Check the final target too: an upload named ".bashrc" into ~ must fail
+      safePath(path.join(destDir, name));
+      cb(null, name);
     } catch {
       cb(new Error("Invalid filename"));
     }
@@ -529,8 +703,7 @@ function requireAuth(req, res, next) {
   if (!isConfigured()) {
     return res.status(503).json({ error: "Not configured", needsSetup: true });
   }
-  const cookies = parseCookies(req.headers.cookie);
-  if (validateAuthToken(cookies.auth)) {
+  if (isRequestAuthed(req)) {
     return next();
   }
   res.status(401).json({ error: "Unauthorized" });
@@ -538,14 +711,20 @@ function requireAuth(req, res, next) {
 
 // --- Unauthenticated endpoints ---
 
-app.get("/api/status", (_req, res) => {
-  res.json({ needsSetup: !isConfigured() });
+app.get("/api/status", (req, res) => {
+  const tunnel = isTunnelRequest(req);
+  // The login form shows the code box / hides "Remember me" from these
+  res.json({ needsSetup: !isConfigured(), totpRequired: tunnel, rememberMeAllowed: !tunnel });
 });
 
 // Setup endpoint - first-run configuration
 app.post("/api/setup", rateLimit, (req, res) => {
   if (isConfigured()) {
     return res.status(400).json({ error: "Already configured" });
+  }
+  // First-run setup sets the password with no second factor: LAN only
+  if (isTunnelRequest(req)) {
+    return res.status(403).json({ error: "Finish setup from the local network first" });
   }
 
   const { username, password, sharedDir, allowFullFilesystem } = req.body;
@@ -580,21 +759,40 @@ app.post("/api/auth", rateLimit, (req, res) => {
   if (!isConfigured()) {
     return res.status(503).json({ error: "Not configured", needsSetup: true });
   }
-  const { username, password, rememberMe } = req.body;
+  const { username, password } = req.body;
+  const tunnel = isTunnelRequest(req);
+  // Via tunnel: never a 30-day cookie on a shared laptop
+  const rememberMe = !tunnel && !!req.body.rememberMe;
+
+  let totpStep = null;
+  if (tunnel) {
+    // Fail closed: internet logins need a second factor, so no secret = no login
+    if (!config.totpSecret) {
+      return res.status(403).json({ error: "Two-factor code is not set up on the server. Run scripts/set-totp.js on the server first." });
+    }
+    // Checked before the password so a missing code never reveals whether the password was right
+    const code = String(req.body.code || "").replace(/\s+/g, "");
+    if (!code) {
+      return res.status(400).json({ error: "Enter the 6-digit code from your authenticator app", totpRequired: true });
+    }
+    totpStep = verifyTotp(config.totpSecret, code, { lastStep: lastTotpStep });
+  }
 
   const expectedUser = (config.username || "admin").toLowerCase();
-  if ((username || "").trim().toLowerCase() !== expectedUser) {
-    return res.status(401).json({ error: "Invalid credentials" });
+  const userOk = typeof username === "string" && username.trim().toLowerCase() === expectedUser;
+  const passwordOk = userOk && typeof password === "string" && verifyPassword(password);
+
+  if (!passwordOk || (tunnel && totpStep === null)) {
+    // One message for every failure: don't say which factor was wrong
+    return res.status(401).json({ error: tunnel ? "Invalid credentials or code" : "Invalid credentials" });
   }
 
-  if (verifyPassword(password)) {
-    upgradePasswordHash(password);
-    const token = generateAuthToken(!!rememberMe);
-    setAuthCookie(res, req, token, !!rememberMe);
-    res.json({ ok: true });
-  } else {
-    res.status(401).json({ error: "Invalid credentials" });
-  }
+  // Burn the step only once both factors passed, so a wrong password can't use up a valid code
+  if (tunnel) lastTotpStep = totpStep;
+  upgradePasswordHash(password);
+  const token = generateAuthToken(rememberMe, { tunnel });
+  setAuthCookie(res, req, token, rememberMe);
+  res.json({ ok: true });
 });
 
 app.get("/api/settings", requireAuth, (_req, res) => {
@@ -645,8 +843,10 @@ app.post("/api/settings", requireAuth, (req, res) => {
 
   saveConfig(config);
 
-  const token = generateAuthToken(true);
-  setAuthCookie(res, req, token, true);
+  // Keep the same session kind: a tunnel session stays short and tunnel-scoped
+  const tunnel = isTunnelRequest(req);
+  const token = generateAuthToken(!tunnel, { tunnel });
+  setAuthCookie(res, req, token, !tunnel);
 
   res.json({ ok: true });
 });
@@ -671,11 +871,17 @@ app.get("/icon-maskable-512.png", (_req, res) => res.type("image/png").sendFile(
 const UNSAFE_EXTENSIONS = new Set([".html", ".htm", ".svg", ".xml", ".xhtml", ".svgz"]);
 
 // Serve files from any path for previews (auth via cookie)
+// Via tunnel, file bytes must not linger in the shared laptop's HTTP cache
+// (or Cloudflare's edge cache, which caches by extension)
+function noStoreOnTunnel(req, res) {
+  if (isTunnelRequest(req)) res.setHeader("Cache-Control", "private, no-store");
+}
+
 app.get("/files/{*filepath}", (req, res) => {
-  const cookies = parseCookies(req.headers.cookie);
-  if (!validateAuthToken(cookies.auth)) {
+  if (!isRequestAuthed(req)) {
     return res.status(401).json({ error: "Unauthorized" });
   }
+  noStoreOnTunnel(req, res);
   try {
     let filePath = req.params.filepath || "";
     if (Array.isArray(filePath)) {
@@ -734,11 +940,11 @@ app.get("/api/tree", requireAuth, async (req, res) => {
 app.get("/api/list", requireAuth, async (req, res) => {
   try {
     const dir = safePath(req.query.path || config.sharedDir);
-    const showHidden = req.query.hidden === "true";
     const entries = await fs.readdir(dir, { withFileTypes: true });
     const items = await Promise.all(
       entries.map(async (entry) => {
-        if (!showHidden && entry.name.startsWith(".")) return null;
+        // Hidden entries are never listed (the old ?hidden=true is ignored): safePath refuses them anyway
+        if (entry.name.startsWith(".")) return null;
 
         const fullPath = path.join(dir, entry.name);
         let stat;
@@ -979,8 +1185,17 @@ function safeContentDisposition(filename, type = "attachment") {
 }
 
 // API: Logout
-app.post("/api/logout", (_req, res) => {
-  clearAuthCookie(res);
+// Revokes the token server-side too, so a copy of the cookie dies with it
+app.post("/api/logout", (req, res) => {
+  const cookies = parseCookies(req.headers.cookie);
+  try {
+    revokeAuthToken(cookies.auth);
+  } catch (err) {
+    console.error("Failed to record token revocation:", err.message);
+    clearAuthCookie(res, req);
+    return res.status(500).json({ error: "Signed out on this device, but the server could not revoke the session" });
+  }
+  clearAuthCookie(res, req);
   res.json({ ok: true });
 });
 
@@ -1014,6 +1229,7 @@ app.get("/api/properties", requireAuth, async (req, res) => {
           const entries = await fs.readdir(dir, { withFileTypes: true });
           for (const entry of entries) {
             if (fileCount + folderCount > MAX_FILES) { truncated = true; return; }
+            if (entry.name.startsWith(".")) continue; // hidden paths are off limits, sizes included
             const full = path.join(dir, entry.name);
             if (entry.isDirectory()) {
               folderCount++;
@@ -1043,10 +1259,10 @@ app.get("/api/properties", requireAuth, async (req, res) => {
 
 // API: Download file or folder as ZIP
 app.get("/api/download", async (req, res) => {
-  const cookies = parseCookies(req.headers.cookie);
-  if (!validateAuthToken(cookies.auth)) {
+  if (!isRequestAuthed(req)) {
     return res.status(401).json({ error: "Unauthorized" });
   }
+  noStoreOnTunnel(req, res);
   try {
     const file = safePath(req.query.path);
     const stat = await fs.stat(file);
@@ -1065,7 +1281,9 @@ app.get("/api/download", async (req, res) => {
       // Stop walking/reading the tree if the client cancels the download
       res.on('close', () => archive.destroy());
       archive.pipe(res);
-      archive.directory(file, fileName);
+      // A folder ZIP must not carry hidden children (zipping ~ would include ~/.ssh).
+      // archiver stores symlinks as links (lstat), so no content leaks through them.
+      archive.directory(file, fileName, (entry) => (hasHiddenSegment(entry.name) ? false : entry));
       await archive.finalize();
     } else {
       const ext = path.extname(file).toLowerCase();
@@ -1104,8 +1322,26 @@ const startLog = () => {
   console.log(`Configured: ${isConfigured() ? "yes" : "no (setup required)"}`);
 };
 
-const host = process.env.HOST || "0.0.0.0";
-app.listen(config.port, host, () => {
-  console.log(`File Explorer running at http://${host}:${config.port}`);
-  startLog();
-});
+// Listen only when run directly; tests require() the module and listen on a random port
+if (require.main === module) {
+  const host = process.env.HOST || "0.0.0.0";
+  app.listen(config.port, host, () => {
+    console.log(`File Explorer running at http://${host}:${config.port}`);
+    startLog();
+    if (!resolveAccessConfig(config.access)) console.log("Tunnel access: NOT configured (all tunnel requests get 403)");
+    if (!config.totpSecret) console.log("Tunnel two-factor: NOT enrolled (tunnel logins refused; run scripts/set-totp.js)");
+  });
+}
+
+module.exports = {
+  app,
+  safePath,
+  hasHiddenSegment,
+  generateAuthToken,
+  validateAuthToken,
+  revokeAuthToken,
+  isTunnelRequest,
+  getConfig: () => config,
+  REVOKED_PATH,
+  _resetRateLimitForTests: () => rateLimitMap.clear(),
+};

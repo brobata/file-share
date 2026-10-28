@@ -2626,7 +2626,9 @@
     <form onsubmit="event.preventDefault();submitAuth();" autocomplete="on">
       <input type="text" id="authUsername" name="username" autocomplete="username" placeholder="Username" style="width:100%;padding:12px 16px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:14px;margin-bottom:12px;text-align:center;">
       <input type="password" id="authPassword" name="password" autocomplete="current-password" placeholder="Password" style="width:100%;padding:12px 16px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:14px;margin-bottom:12px;text-align:center;">
-      <label style="display:flex;align-items:center;gap:8px;justify-content:center;font-size:13px;color:var(--text-muted);margin-bottom:16px;cursor:pointer;">
+      <!-- Shown only when /api/status says a code is needed (internet access via the tunnel) -->
+      <input type="text" id="authCode" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]*" maxlength="7" placeholder="6-digit code" aria-label="6-digit code from your authenticator app" style="display:none;width:100%;padding:12px 16px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:14px;margin-bottom:12px;text-align:center;letter-spacing:2px;">
+      <label id="authRememberRow" style="display:flex;align-items:center;gap:8px;justify-content:center;font-size:13px;color:var(--text-muted);margin-bottom:16px;cursor:pointer;">
         <input type="checkbox" id="authRemember" checked style="width:16px;height:16px;accent-color:var(--accent);">
         Remember me for 30 days
       </label>
@@ -2948,12 +2950,6 @@
       Size
     </button>
   </div>
-  <button class="sort-btn hidden-toggle" id="hiddenToggle" onclick="toggleHiddenFiles()" title="Show hidden files">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
-    </svg>
-    Hidden
-  </button>
   <div class="view-toggle">
     <button id="viewGridBtn" class="active" onclick="setViewMode('grid')" title="Grid view">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
@@ -3209,7 +3205,6 @@ let searchQuery = "";
 let drives = [];
 let expandedPaths = new Set();
 let sidebarCollapsed = localStorage.getItem("sidebarCollapsed") === "true";
-let showHiddenFiles = localStorage.getItem("showHiddenFiles") === "true";
 let navHistory = [];
 let navHistoryIndex = -1;
 let viewMode = localStorage.getItem("viewMode") || "grid";
@@ -3219,10 +3214,24 @@ let lastClickTime = 0;
 let lastClickIndex = -1;
 
 // Setup functions
+// Via the internet tunnel the server asks for a 6-digit code and never
+// issues a 30-day cookie, so the login form follows what it reports.
+let totpRequired = false;
+
+function applyLoginMode(status) {
+  totpRequired = !!status.totpRequired;
+  document.getElementById("authCode").style.display = totpRequired ? "" : "none";
+  const rememberRow = document.getElementById("authRememberRow");
+  const allowRemember = status.rememberMeAllowed !== false;
+  rememberRow.style.display = allowRemember ? "flex" : "none";
+  if (!allowRemember) document.getElementById("authRemember").checked = false;
+}
+
 async function checkSetupNeeded() {
   try {
     const res = await fetch("/api/status");
     const data = await res.json();
+    applyLoginMode(data);
     return data.needsSetup;
   } catch {
     return false;
@@ -3277,25 +3286,36 @@ async function submitSetup() {
 async function submitAuth() {
   const username = document.getElementById("authUsername").value;
   const password = document.getElementById("authPassword").value;
-  const rememberMe = document.getElementById("authRemember").checked;
+  const rememberMe = !totpRequired && document.getElementById("authRemember").checked;
+  const codeEl = document.getElementById("authCode");
   const errorEl = document.getElementById("authError");
+
+  const body = { username, password, rememberMe };
+  if (totpRequired) body.code = codeEl.value.replace(/\s+/g, "");
 
   try {
     const res = await fetch("/api/auth", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, password, rememberMe })
+      body: JSON.stringify(body)
     });
 
     if (res.ok) {
+      codeEl.value = "";
       document.getElementById("authOverlay").classList.add("hidden");
       initApp();
     } else {
       const err = await res.json().catch(() => null);
       errorEl.textContent = (err && err.error) || "Invalid credentials";
       errorEl.classList.add("visible");
-      document.getElementById("authPassword").value = "";
-      document.getElementById("authPassword").focus();
+      // A code is single-use, so clear it with the password; a missing code just needs typing
+      codeEl.value = "";
+      if (err && err.totpRequired && password) {
+        codeEl.focus();
+      } else {
+        document.getElementById("authPassword").value = "";
+        document.getElementById("authPassword").focus();
+      }
     }
   } catch (err) {
     errorEl.textContent = "Connection error";
@@ -3420,21 +3440,6 @@ function clearSearch() {
   searchQuery = "";
   document.getElementById("clearSearch").classList.remove("visible");
   applyFilterAndSort();
-}
-
-function toggleHiddenFiles() {
-  showHiddenFiles = !showHiddenFiles;
-  localStorage.setItem("showHiddenFiles", showHiddenFiles);
-  updateHiddenToggle();
-  navigate(currentPath);
-}
-
-function updateHiddenToggle() {
-  const btn = document.getElementById("hiddenToggle");
-  if (btn) {
-    btn.classList.toggle("active", showHiddenFiles);
-    btn.title = showHiddenFiles ? "Hide hidden files" : "Show hidden files";
-  }
 }
 
 // Sort functions
@@ -4573,9 +4578,8 @@ async function navigate(path, { pushHistory = true, navPush = true } = {}) {
   if (!isRefresh) showLoadingSkeletons();
 
   try {
-    let listUrl = "/api/list?path=" + encodeURIComponent(currentPath);
-    if (showHiddenFiles) listUrl += "&hidden=true";
-    const res = await fetch(listUrl);
+    // Hidden files are never served (the server refuses dot-paths), so there is no ?hidden toggle
+    const res = await fetch("/api/list?path=" + encodeURIComponent(currentPath));
     if (res.status === 401) {
       document.getElementById("authOverlay").classList.remove("hidden");
       document.getElementById("authUsername").focus();
@@ -6783,9 +6787,6 @@ async function initApp() {
     document.getElementById("sidebar").classList.add("collapsed");
   }
   document.body.classList.toggle("sidebar-is-collapsed", sidebarCollapsed);
-
-  // Restore hidden files toggle state
-  updateHiddenToggle();
 
   // Restore view mode
   if (viewMode === "details") {

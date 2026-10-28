@@ -6,6 +6,7 @@ COPY package*.json ./
 RUN npm ci --only=production
 
 COPY server.js ./
+COPY lib ./lib
 COPY public ./public
 
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup

@@ -4,7 +4,9 @@
   "description": "Local network file sharing app with browser-based setup",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test test/*.test.js",
+    "set-totp": "node scripts/set-totp.js"
   },
   "keywords": [],
   "author": "",
@@ -15,6 +17,8 @@
     "compression": "^1.8.1",
     "express": "^5.2.1",
     "helmet": "^8.1.0",
-    "multer": "^2.0.2"
+    "jose": "^5.10.0",
+    "multer": "^2.0.2",
+    "qrcode": "^1.5.4"
   }
 }
